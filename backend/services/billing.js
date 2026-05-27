@@ -1,17 +1,34 @@
 // Billing service — deduct credits per call, log transactions
 const db = require('./supabase');
 
-// Flat rate: ₹6 per minute (covers Plivo + STT + TTS + LLM + platform)
+// What you charge clients
 const RATE_PER_MIN = 6.00;
+
+// Actual platform costs (for internal margin tracking only — does NOT affect client billing)
+// Plivo outbound India: ₹0.60/min
+// Sarvam STT (saarika:v2.5): ₹0.50/min  (₹30/hr)
+// Sarvam TTS (bulbul:v3): ₹0.90/min     (₹30/10k chars, ~300 chars/min)
+// Groq LLM (8b-instant): ~₹0/min        ($0.05/1M tokens — negligible)
+// LiveKit: ~₹0.30/min                   (free tier 10k min/mo, then $0.004/participant-min)
+// Total cost: ~₹2.30/min  →  Margin: ~₹3.70/min (62%)
+const COST_PER_MIN = {
+  plivo:   0.60,
+  stt:     0.50,
+  tts:     0.90,
+  llm:     0.00,
+  livekit: 0.30,
+};
 
 function calcCost(durationSeconds) {
   const mins = durationSeconds / 60;
   const total = +(RATE_PER_MIN * mins).toFixed(4);
   return {
-    cost_plivo: +(1.80 * mins).toFixed(4),
-    cost_stt:   +(1.50 * mins).toFixed(4),
-    cost_tts:   +(0.70 * mins).toFixed(4),
-    cost_llm:   +(0.50 * mins).toFixed(4),
+    cost_plivo:   +(COST_PER_MIN.plivo   * mins).toFixed(4),
+    cost_stt:     +(COST_PER_MIN.stt     * mins).toFixed(4),
+    cost_tts:     +(COST_PER_MIN.tts     * mins).toFixed(4),
+    cost_llm:     +(COST_PER_MIN.llm     * mins).toFixed(4),
+    cost_livekit: +(COST_PER_MIN.livekit * mins).toFixed(4),
+    cost_platform: +(Object.values(COST_PER_MIN).reduce((a, b) => a + b, 0) * mins).toFixed(4),
     cost_total: total,
   };
 }
