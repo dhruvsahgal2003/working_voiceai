@@ -133,8 +133,9 @@ export const api = {
   settings: {
     getCredentials: () => req('GET', '/settings/credentials'),
     saveCredentials: d => req('PUT', '/settings/credentials', d),
+    connectPlivo: d => req('POST', '/settings/connect-plivo', d),
+    disconnectPlivo: () => req('POST', '/settings/disconnect-plivo', {}),
     testPlivo: d => req('POST', '/settings/test-plivo', d),
-    testLiveKit: d => req('POST', '/settings/test-livekit', d),
   },
   transcripts: { get: callId => req('GET', `/transcripts/${callId}`) },
   recordings: { get: callId => req('GET', `/recordings/${callId}`) },

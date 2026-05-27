@@ -189,4 +189,49 @@ async function stopRoomRecording(egressId, callId, credentials = {}) {
   }
 }
 
-module.exports = { createRoom, deleteRoom, generateToken, dispatchAgent, dialOutbound, getRoomClient, startRoomRecording, stopRoomRecording };
+// ─── AUTO-PROVISION PER-USER SIP TRUNK ───────────────────────────────────────
+/**
+ * Create (or update) a LiveKit outbound SIP trunk for a user's Plivo account.
+ * Called automatically when the user saves their Plivo credentials.
+ *
+ * @param {string} userId       - For trunk naming / metadata
+ * @param {string} plivoAuthId  - Plivo Auth ID (used as SIP username)
+ * @param {string} plivoToken   - Plivo Auth Token (used as SIP password)
+ * @param {string[]} numbers    - User's Plivo DID numbers (from/callerID)
+ * @param {string|null} existingTrunkId - If already provisioned, update instead of create
+ * @returns {string|null} LiveKit SIP trunk ID (ST_xxx) or null on failure
+ */
+async function autoProvisionTrunk(userId, plivoAuthId, plivoToken, numbers = [], existingTrunkId = null) {
+  const client = getSipClient();   // always uses platform-level LiveKit env vars
+  if (!client) {
+    console.warn('[AutoProvision] LiveKit SipClient not available — LIVEKIT_URL/KEY/SECRET not set');
+    return null;
+  }
+  const trunkName = `callora-${userId.slice(0, 8)}`;
+  const opts = {
+    authUsername: plivoAuthId,
+    authPassword: plivoToken,
+  };
+  try {
+    if (existingTrunkId) {
+      // Update existing trunk with fresh credentials / numbers
+      await client.updateSipOutboundTrunk(existingTrunkId, trunkName, 'trunkinbound.plivo.com', numbers, opts);
+      console.log(`[AutoProvision] Updated SIP trunk ${existingTrunkId} for user ${userId}`);
+      return existingTrunkId;
+    }
+    const trunk = await client.createSipOutboundTrunk(
+      trunkName,
+      'trunkinbound.plivo.com',
+      numbers,
+      opts,
+    );
+    const trunkId = trunk.sipTrunkId;
+    console.log(`[AutoProvision] Created SIP trunk ${trunkId} for user ${userId}`);
+    return trunkId;
+  } catch (err) {
+    console.error('[AutoProvision] SIP trunk error:', err.message);
+    return null;
+  }
+}
+
+module.exports = { createRoom, deleteRoom, generateToken, dispatchAgent, dialOutbound, getRoomClient, startRoomRecording, stopRoomRecording, autoProvisionTrunk };

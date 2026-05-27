@@ -80,7 +80,27 @@ app.get('/api/internal/agent-config', async (req, res) => {
       language: lead.language || '',
     };
 
-    if (cl?.agents) return res.json({ ...cl.agents, lead_metadata: leadMeta });
+    // Platform-level keys are always injected — never stored per-user
+    // livekit_url column in user_credentials holds the per-user SIP trunk ID (ST_xxx)
+    const platformKeys = {
+      sarvam_api_key: process.env.SARVAM_API_KEY,
+      openai_api_key: process.env.OPENAI_API_KEY,
+      groq_api_key:   process.env.GROQ_API_KEY,
+      livekit_url:    process.env.LIVEKIT_URL,
+      livekit_api_key: process.env.LIVEKIT_API_KEY,
+      livekit_api_secret: process.env.LIVEKIT_API_SECRET,
+    };
+
+    // Attach per-user SIP trunk ID so the call uses their Plivo account
+    if (cl?.user_id) {
+      const { data: userCreds } = await db.from('user_credentials')
+        .select('livekit_url').eq('user_id', cl.user_id).single();
+      if (userCreds?.livekit_url) {
+        platformKeys.livekit_sip_trunk_id = userCreds.livekit_url;
+      }
+    }
+
+    if (cl?.agents) return res.json({ ...cl.agents, ...platformKeys, lead_metadata: leadMeta });
 
     // FALLBACK: call_log has no agent linked → use the user's most recently updated agent
     if (cl?.user_id) {
@@ -89,7 +109,7 @@ app.get('/api/internal/agent-config', async (req, res) => {
         .order('updated_at', { ascending: false }).limit(1).maybeSingle();
       if (userAgent) {
         console.log(`[agent-config] room=${room} fallback to user's agent: ${userAgent.name} (${userAgent.llm_model})`);
-        return res.json({ ...userAgent, lead_metadata: leadMeta });
+        return res.json({ ...userAgent, ...platformKeys, lead_metadata: leadMeta });
       }
     }
 
