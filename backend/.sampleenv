@@ -1,0 +1,19 @@
+PORT=5000
+NODE_ENV=development
+
+# ── PLIVO (fill these after account setup) ─────────────────────
+PLIVO_AUTH_ID=MANDLHMWY0MJUTMDM3NC
+PLIVO_AUTH_TOKEN=YTY4M2EzN2YtMzFhYi00MjNlLTYzMGUtMzJiNTg4
+PLIVO_FROM_NUMBER=+918031152420
+PLIVO_AI_AGENT_ID=PLACEHOLDER_AGENT_ID
+
+# ── SUPABASE (fill these after project creation) ───────────────
+SUPABASE_URL=https://placeholder.supabase.co
+SUPABASE_SERVICE_KEY=placeholder_service_key
+
+# ── APP ────────────────────────────────────────────────────────
+FRONTEND_URL=http://localhost:5173
+WEBHOOK_BASE_URL=http://localhost:5000
+
+# ── NOTIFICATIONS (optional) ──────────────────────────────────
+SALES_TEAM_WHATSAPP=+918031152420
