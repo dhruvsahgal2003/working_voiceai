@@ -1,23 +1,18 @@
-const { createClient } = require('@supabase/supabase-js');
-
-const isLocal = process.env.USE_MOCK_DB === 'true' ||
-  !process.env.SUPABASE_URL ||
-  process.env.SUPABASE_URL.includes('placeholder') ||
-  process.env.SUPABASE_URL.includes('localhost');
+const forceMock = process.env.USE_MOCK_DB === 'true';
+const hasLocalPg = !!process.env.DATABASE_URL;
 
 let supabase;
-if (isLocal) {
-  console.log('[DB] ⚡ Using in-memory MockDB (local dev mode)');
+if (forceMock) {
+  console.log('[DB] ⚡ Using in-memory MockDB (USE_MOCK_DB=true)');
   supabase = require('./mockDb');
+} else if (hasLocalPg) {
+  // Local PostgreSQL via the Supabase-compatible shim — no Supabase project,
+  // no project freezing. Browse it in DBeaver (see .env DBeaver block).
+  console.log('[DB] 🐘 Connecting to local PostgreSQL:', (process.env.DATABASE_URL || '').replace(/:[^:@/]*@/, ':****@'));
+  supabase = require('./pgClient');
 } else {
-  console.log('[DB] 🔌 Connecting to Supabase:', process.env.SUPABASE_URL);
-  // Node 20 needs ws package for Supabase Realtime
-  const WebSocket = require('ws');
-  supabase = createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_KEY,
-    { realtime: { transport: WebSocket } }
-  );
+  console.log('[DB] ⚡ Using in-memory MockDB (no DB configured)');
+  supabase = require('./mockDb');
 }
 
 module.exports = supabase;
