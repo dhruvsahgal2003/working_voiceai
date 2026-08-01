@@ -219,7 +219,7 @@ async function claimNextLead(campaignId, userId) {
 // across every campaign/client combined — can be actively processing at once, which
 // the old independent-per-campaign-loop design had no way to do.
 async function processDialJob(job) {
-  const { campaignId, userId } = job.data;
+  const { campaignId, userId, queueName } = job.data;
 
   const { data: campaign } = await supabase.from('campaigns').select('*').eq('id', campaignId).single();
   if (!campaign || campaign.status !== 'running') return; // paused/deleted since this step was queued
@@ -256,7 +256,7 @@ async function processDialJob(job) {
   const { data: dncEntry } = await supabase.from('dnc_list').select('id').eq('phone', lead.phone).eq('user_id', userId).single();
   if (dncEntry) {
     await supabase.from('leads').update({ status: 'dnc' }).eq('id', lead.id);
-    await enqueueDial(campaignId, userId, 0); // skip immediately, no pacing delay
+    await enqueueDial(campaignId, userId, 0, queueName); // skip immediately, no pacing delay
     return;
   }
 
@@ -292,7 +292,7 @@ async function processDialJob(job) {
   // a DB blip in the campaign/DNC lookups) throws out of processDialJob entirely —
   // BullMQ retries the job itself (attempts+backoff, see queue.js) instead of
   // stranding the whole campaign the way an uncaught error in the old single loop did.
-  await enqueueDial(campaignId, userId, delayMs);
+  await enqueueDial(campaignId, userId, delayMs, queueName);
 }
 
 // Called once at server startup — backstop for campaigns left at status='running'
