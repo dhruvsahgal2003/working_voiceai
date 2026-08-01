@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express   = require('express');
+require('express-async-errors'); // makes rejected promises in async route handlers flow to the error middleware below instead of crashing the process (Express 4 doesn't do this natively)
 const cors      = require('cors');
 const helmet    = require('helmet');
 const morgan    = require('morgan');
@@ -13,10 +14,30 @@ const server = http.createServer(app);
 // Trust nginx reverse proxy (fixes X-Forwarded-For in rate limiter)
 app.set('trust proxy', 1);
 
+// ─── PROCESS-LEVEL CRASH GUARDS ────────────────────────────────────────────────
+// unhandledRejection: log and keep running. Most rejections here come from
+// fire-and-forget background work (webhook delivery, notifications, the campaign
+// dialing loop) that outlives the request that started it — killing the whole
+// process over one such failure would drop every other in-flight call too.
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason instanceof Error ? reason.stack : reason);
+});
+// uncaughtException: a synchronous throw outside Express's request handling means
+// the process is in an unknown state — log with full context, then exit so PM2
+// restarts into a clean process rather than continuing to serve from a bad state.
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err.stack || err);
+  process.exit(1);
+});
+
 // ─── SECURITY MIDDLEWARE ───────────────────────────────────────────────────────
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({
-  origin: [process.env.FRONTEND_URL || 'http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000'],
+  origin: [
+    process.env.FRONTEND_URL || 'http://localhost:5173',
+    'https://velryx.in', 'https://www.velryx.in',
+    'http://localhost:5174', 'http://localhost:3000',
+  ],
   credentials: true,
 }));
 app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 500 }));
@@ -95,8 +116,9 @@ app.get('/api/internal/agent-config', async (req, res) => {
     if (cl?.user_id) {
       const { data: userCreds } = await db.from('user_credentials')
         .select('livekit_url').eq('user_id', cl.user_id).single();
-      if (userCreds?.livekit_url) {
-        platformKeys.livekit_sip_trunk_id = userCreds.livekit_url;
+      const prov = require('./services/livekit').parseProvision(userCreds?.livekit_url);
+      if (prov?.lk_trunk) {
+        platformKeys.livekit_sip_trunk_id = prov.lk_trunk;
       }
     }
 
@@ -124,6 +146,59 @@ app.get('/api/internal/agent-config', async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── INTERNAL — agent triggers egress when SIP participant joins ──────────────
+// Called by agent.py via POST /api/internal/start-recording when it detects
+// the SIP/human participant connected to the room.  At that point both the agent
+// and the human are in the room → egress will capture both channels correctly.
+app.post('/api/internal/start-recording', async (req, res) => {
+  const secret = req.headers['x-internal-secret'];
+  if (secret !== process.env.INTERNAL_SECRET && process.env.INTERNAL_SECRET !== 'dev') {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const { room_name } = req.body;
+  if (!room_name) return res.status(400).json({ error: 'room_name required' });
+
+  try {
+    const db = require('./services/supabase');
+    const { startRoomRecording } = require('./services/livekit');
+
+    // Look up call_log — only start egress if not already recording
+    const { data: cl } = await db
+      .from('call_logs')
+      .select('id, livekit_egress_id, user_id')
+      .eq('livekit_room_name', room_name)
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (!cl) {
+      console.log(`[Recording/internal] No call_log found for room ${room_name}`);
+      return res.status(404).json({ error: 'Call log not found' });
+    }
+
+    if (cl.livekit_egress_id) {
+      // Already recording (immediate start beat us here) — no-op
+      console.log(`[Recording/internal] Room ${room_name} already recording (${cl.livekit_egress_id})`);
+      return res.json({ success: true, alreadyRecording: true, egressId: cl.livekit_egress_id });
+    }
+
+    // Stop any orphan egress started at call-init time (before SIP participant joined)
+    // — We'll let the DB-guided egress above handle dedup; if none exists, start fresh.
+    const egress = await startRoomRecording(room_name, cl.id);
+    if (egress?.egressId) {
+      await db.from('call_logs')
+        .update({ livekit_egress_id: egress.egressId })
+        .eq('id', cl.id);
+      console.log(`[Recording/internal] Egress ${egress.egressId} started for ${room_name} (agent-triggered)`);
+      return res.json({ success: true, egressId: egress.egressId });
+    }
+    return res.status(500).json({ error: 'Failed to start egress' });
+  } catch (err) {
+    console.error('[Recording/internal] Error:', err.message);
+    return res.status(500).json({ error: err.message });
   }
 });
 
