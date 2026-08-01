@@ -1,14 +1,42 @@
 const axios = require('axios');
 const { v4: uuidv4 } = require('uuid');
 const livekit = require('./livekit');
+const db = require('./supabase');
 
 const isLocal = !process.env.PLIVO_AUTH_ID ||
   process.env.PLIVO_AUTH_ID.includes('PLACEHOLDER');
 
-const useLiveKitSip = !!process.env.LIVEKIT_SIP_TRUNK_ID;
+// Resolve the SIP trunk + caller-ID number for a given user. Prefers the user's
+// own auto-provisioned trunk (plug-and-play), falls back to the platform .env trunk.
+async function resolveUserTrunk(userId) {
+  let trunkId   = process.env.LIVEKIT_SIP_TRUNK_ID || null;
+  let fromNumber = process.env.PLIVO_FROM_NUMBER || null;
+  if (userId) {
+    try {
+      const { data: uc } = await db.from('user_credentials')
+        .select('livekit_url').eq('user_id', userId).single();
+      const prov = livekit.parseProvision(uc?.livekit_url);
+      if (prov?.lk_trunk) {
+        trunkId = prov.lk_trunk;
+        if (prov.from) fromNumber = prov.from;
+      }
+    } catch { /* fall back to platform defaults */ }
+  }
+  return { trunkId, fromNumber };
+}
 
 // ─── TRIGGER CALL ─────────────────────────────────────────────────────────────
-async function triggerCall({ phone, name, city, propertyType, budget, language, leadId }) {
+async function triggerCall({ phone, name, city, propertyType, budget, language, leadId, userId }) {
+  if (process.env.LOAD_TEST_MODE === 'true') {
+    // Explicit load-testing flag — deliberately separate from `isLocal` above, which
+    // is keyed off real Plivo credentials being absent. Here real credentials ARE
+    // configured (this is prod); this flag exists purely so scripts/load-test.js can
+    // drive the full campaign-queue path without ever touching real Plivo/LiveKit or
+    // placing a real call, no matter what's in .env.
+    const fakeUuid = `LOADTEST-${uuidv4().slice(0, 8)}`;
+    return { success: true, callUuid: fakeUuid, roomName: `loadtest-${fakeUuid}`, fromNumber: 'LOADTEST' };
+  }
+
   if (isLocal) {
     // Simulate call in local mode — returns a fake UUID instantly
     const fakeUuid = `LOCAL-${uuidv4().slice(0, 8)}`;
@@ -54,22 +82,24 @@ async function triggerCall({ phone, name, city, propertyType, budget, language, 
   }
 
   // ─── LIVEKIT SIP (via Plivo Zentrunk) ───────────────────────────────────────
-  if (useLiveKitSip) {
+  const { trunkId, fromNumber } = await resolveUserTrunk(userId);
+  if (trunkId) {
     try {
       const roomName = `call-${leadId}-${Date.now()}`;
       const callUuid = `LK-${uuidv4().slice(0, 12)}`;
       const metadata = { leadId, name, city, propertyType, budget, language, callUuid };
 
-      // Create room first, then dispatch agent + dial in parallel
+      // Create room first, then dispatch agent + dial in parallel.
+      // Pass the user's own trunk so the call routes through THEIR Plivo account.
       await livekit.createRoom(roomName);
 
       await Promise.all([
         livekit.dispatchAgent(roomName, metadata),
-        livekit.dialOutbound(roomName, phone, name || phone, metadata),
+        livekit.dialOutbound(roomName, phone, name || phone, metadata, { livekit_sip_trunk_id: trunkId }),
       ]);
 
-      console.log(`[LiveKit SIP] Call initiated → room: ${roomName}, to: ${phone}`);
-      return { success: true, callUuid, roomName };
+      console.log(`[LiveKit SIP] Call initiated → room: ${roomName}, to: ${phone}, trunk: ${trunkId}`);
+      return { success: true, callUuid, roomName, fromNumber };
     } catch (err) {
       console.error('[LiveKit SIP] triggerCall error:', err.message);
       throw new Error(err.message);
@@ -95,7 +125,7 @@ async function triggerCall({ phone, name, city, propertyType, budget, language, 
       },
       { auth: { username: process.env.PLIVO_AUTH_ID, password: process.env.PLIVO_AUTH_TOKEN } }
     );
-    return { success: true, callUuid: response.data.request_uuid || response.data.call_uuid };
+    return { success: true, callUuid: response.data.request_uuid || response.data.call_uuid, fromNumber };
   } catch (err) {
     console.error('[Plivo] triggerCall error:', err.response?.data || err.message);
     throw new Error(err.response?.data?.error || err.message);

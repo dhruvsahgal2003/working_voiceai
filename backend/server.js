@@ -264,6 +264,8 @@ server.listen(PORT, () => {
   console.log(`📡 Webhook URL: ${process.env.WEBHOOK_BASE_URL || 'http://localhost:' + PORT}/api/webhook/plivo`);
   console.log(`🔗 Frontend:   ${process.env.FRONTEND_URL || 'http://localhost:5173'}\n`);
 
-  require('./routes/campaigns').resumeInterruptedCampaigns()
+  const campaigns = require('./routes/campaigns');
+  require('./services/queue').startWorker(campaigns.processDialJob);
+  campaigns.resumeInterruptedCampaigns()
     .catch(err => console.error('[Campaign] Resume-on-startup failed:', err.message));
 });
