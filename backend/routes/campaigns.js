@@ -198,73 +198,102 @@ async function runCampaign(campaign) {
   const delayMs = Math.floor(60000 / (campaign.rate_per_min || 5));
   console.log(`[Campaign] Starting: ${campaign.name}`);
 
-  while (isRunnerActive(campaign.id)) {
-    // Check calling hours
-    const istNow = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
-    const t = istNow.getUTCHours() * 60 + istNow.getUTCMinutes();
-    const [sh, sm] = (campaign.start_time || '10:00').split(':').map(Number);
-    const [eh, em] = (campaign.end_time || '19:00').split(':').map(Number);
-    if (t < sh * 60 + sm || t > eh * 60 + em) {
-      console.log(`[Campaign] Outside hours, pausing: ${campaign.name}`);
-      await supabase.from('campaigns').update({ status: 'paused' }).eq('id', campaign.id);
-      setRunnerActive(campaign.id, false);
-      break;
-    }
-
-    // Fetch next pending lead
-    const { data: leads } = await supabase.from('leads')
-      .select('*').eq('campaign_id', campaign.id).eq('user_id', campaign.user_id).eq('status', 'pending')
-      .order('created_at', { ascending: true }).limit(1);
-
-    if (!leads?.length) {
-      console.log(`[Campaign] Completed: ${campaign.name}`);
-      await supabase.from('campaigns').update({ status: 'completed' }).eq('id', campaign.id);
-      await createEvent(campaign.user_id, 'campaign.completed', `Campaign "${campaign.name}" completed`, 'All leads have been processed', { campaign_id: campaign.id });
-      setRunnerActive(campaign.id, false);
-      break;
-    }
-
-    const lead = leads[0];
-    const { data: dncEntry } = await supabase.from('dnc_list').select('id').eq('phone', lead.phone).eq('user_id', campaign.user_id).single();
-    if (dncEntry) { await supabase.from('leads').update({ status: 'dnc' }).eq('id', lead.id); continue; }
-
-    try {
-      await supabase.from('leads').update({ status: 'calling', last_called: new Date().toISOString() }).eq('id', lead.id);
-      const { callUuid, roomName } = await triggerCall({ phone: lead.phone, name: lead.name, city: lead.city, propertyType: lead.property_type, budget: lead.budget, language: lead.language, leadId: lead.id });
-
-      // Resolve agent: campaign.agent_id or user's most-recent agent
-      let agentId = campaign.agent_id;
-      if (!agentId) {
-        const { data: agentRow } = await supabase.from('agents')
-          .select('id').eq('user_id', campaign.user_id)
-          .order('updated_at', { ascending: false }).limit(1).maybeSingle();
-        agentId = agentRow?.id || null;
+  try {
+    while (isRunnerActive(campaign.id)) {
+      // Check calling hours
+      const istNow = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+      const t = istNow.getUTCHours() * 60 + istNow.getUTCMinutes();
+      const [sh, sm] = (campaign.start_time || '10:00').split(':').map(Number);
+      const [eh, em] = (campaign.end_time || '19:00').split(':').map(Number);
+      if (t < sh * 60 + sm || t > eh * 60 + em) {
+        console.log(`[Campaign] Outside hours, pausing: ${campaign.name}`);
+        await supabase.from('campaigns').update({ status: 'paused' }).eq('id', campaign.id);
+        break;
       }
 
-      const callLogId = uuidv4();
-      await supabase.from('call_logs').insert({
-        id: callLogId, user_id: campaign.user_id, lead_id: lead.id, campaign_id: campaign.id,
-        agent_id: agentId,
-        plivo_call_uuid: callUuid, livekit_room_name: roomName || null,
-        from_number: process.env.PLIVO_FROM_NUMBER,
-        to_number: lead.phone, call_status: 'initiated', started_at: new Date().toISOString(),
-      });
+      // Fetch next pending lead
+      const { data: leads } = await supabase.from('leads')
+        .select('*').eq('campaign_id', campaign.id).eq('user_id', campaign.user_id).eq('status', 'pending')
+        .order('created_at', { ascending: true }).limit(1);
 
-      // Start egress recording (fire-and-forget)
-      if (roomName) {
-        startRoomRecording(roomName, callLogId).then(egress => {
-          if (egress?.egressId) {
-            supabase.from('call_logs').update({ livekit_egress_id: egress.egressId }).eq('id', callLogId).catch(() => {});
-          }
-        }).catch(() => {});
+      if (!leads?.length) {
+        console.log(`[Campaign] Completed: ${campaign.name}`);
+        await supabase.from('campaigns').update({ status: 'completed' }).eq('id', campaign.id);
+        await createEvent(campaign.user_id, 'campaign.completed', `Campaign "${campaign.name}" completed`, 'All leads have been processed', { campaign_id: campaign.id });
+        break;
       }
-    } catch (err) {
-      console.error(`[Campaign] Call failed ${lead.phone}:`, err.message);
-      await supabase.from('leads').update({ status: 'pending' }).eq('id', lead.id);
-    }
 
-    await new Promise(r => setTimeout(r, delayMs));
+      const lead = leads[0];
+      const { data: dncEntry } = await supabase.from('dnc_list').select('id').eq('phone', lead.phone).eq('user_id', campaign.user_id).single();
+      if (dncEntry) { await supabase.from('leads').update({ status: 'dnc' }).eq('id', lead.id); continue; }
+
+      try {
+        await supabase.from('leads').update({ status: 'calling', last_called: new Date().toISOString() }).eq('id', lead.id);
+        const { callUuid, roomName, fromNumber } = await triggerCall({ phone: lead.phone, name: lead.name, city: lead.city, propertyType: lead.property_type, budget: lead.budget, language: lead.language, leadId: lead.id, userId: campaign.user_id });
+
+        // Resolve agent: campaign.agent_id or user's most-recent agent
+        let agentId = campaign.agent_id;
+        if (!agentId) {
+          const { data: agentRow } = await supabase.from('agents')
+            .select('id').eq('user_id', campaign.user_id)
+            .order('updated_at', { ascending: false }).limit(1).maybeSingle();
+          agentId = agentRow?.id || null;
+        }
+
+        const callLogId = uuidv4();
+        await supabase.from('call_logs').insert({
+          id: callLogId, user_id: campaign.user_id, lead_id: lead.id, campaign_id: campaign.id,
+          agent_id: agentId,
+          plivo_call_uuid: callUuid, livekit_room_name: roomName || null,
+          from_number: fromNumber || process.env.PLIVO_FROM_NUMBER,
+          to_number: lead.phone, call_status: 'initiated', started_at: new Date().toISOString(),
+        });
+
+        // NOTE: Egress recording is started by the agent via POST /api/internal/start-recording
+        // when it detects the SIP participant joining — ensures both channels are captured.
+      } catch (err) {
+        console.error(`[Campaign] Call failed ${lead.phone}:`, err.message);
+        await supabase.from('leads').update({ status: 'pending' }).eq('id', lead.id);
+      }
+
+      await new Promise(r => setTimeout(r, delayMs));
+    }
+  } catch (err) {
+    // Anything that escapes the per-lead try/catch above (e.g. the lead-fetch or
+    // DNC-check query itself failing) would otherwise strand the campaign as
+    // 'running' in the DB with no active runner — unrecoverable via the UI, since
+    // /launch refuses to relaunch a campaign already marked 'running'. Fall back
+    // to 'paused' so it's both accurate and re-launchable.
+    console.error(`[Campaign] Unexpected error, pausing: ${campaign.name}`, err.message);
+    await supabase.from('campaigns').update({ status: 'paused' }).eq('id', campaign.id).catch(() => {});
+  } finally {
+    setRunnerActive(campaign.id, false);
+  }
+}
+
+// Called once at server startup — resumes campaigns that were mid-flight when the
+// process last crashed/restarted. A campaign left at status='running' in the DB
+// can only mean that: activeRunners is always empty on a fresh process, so nothing
+// is actually driving it anymore.
+async function resumeInterruptedCampaigns() {
+  const { data: orphaned, error } = await supabase.from('campaigns').select('*').eq('status', 'running');
+  if (error) { console.error('[Campaign] resumeInterruptedCampaigns query failed:', error.message); return; }
+  if (!orphaned?.length) return;
+
+  for (const campaign of orphaned) {
+    console.log(`[Campaign] Resuming after restart: ${campaign.name} (${campaign.id})`);
+    // A lead stuck in 'calling' when the process died gets requeued — 10min grace
+    // window so we don't yank a call that's still genuinely in progress.
+    const staleCutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    await supabase.from('leads')
+      .update({ status: 'pending' })
+      .eq('campaign_id', campaign.id)
+      .eq('status', 'calling')
+      .lt('last_called', staleCutoff);
+
+    runCampaign(campaign);
   }
 }
 
 module.exports = router;
+module.exports.resumeInterruptedCampaigns = resumeInterruptedCampaigns;
