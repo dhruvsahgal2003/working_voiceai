@@ -20,6 +20,7 @@ const TABLES = [
   'users', 'user_credentials', 'phone_numbers', 'agents', 'campaigns',
   'leads', 'call_logs', 'transcripts', 'recordings', 'billing_transactions',
   'dnc_list', 'events', 'user_webhooks', 'knowledge_base',
+  'whatsapp_contacts', 'whatsapp_conversations', 'whatsapp_messages',
 ];
 
 const JSONB = {
@@ -28,6 +29,7 @@ const JSONB = {
   call_logs: new Set(['analysis']),
   transcripts: new Set(['turns']),
   events: new Set(['data']),
+  whatsapp_messages: new Set(['raw_payload']),
 };
 
 async function localColumns(table) {

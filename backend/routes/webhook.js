@@ -10,6 +10,7 @@ const { addCredits } = require('../services/billing');
 const { notifyHotLead, createEvent } = require('../services/notifications');
 const { fireWebhooks } = require('../services/webhookFire');
 const { stopRoomRecording } = require('../services/livekit');
+const { upsertContact, getOrCreateConversation, bumpConversation, insertMessage, updateMessageStatus } = require('../services/whatsapp');
 
 // GET /api/webhook/plivo/answer — Plivo calls this when lead picks up
 router.get('/plivo/answer', async (req, res) => {
@@ -143,6 +144,43 @@ router.post('/plivo', async (req, res) => {
   }
 });
 
+// POST /api/webhook/transcript-turn — agent pushes each turn in real-time for live transcription.
+// Acks immediately (fire-and-forget from agent) then appends the turn to transcripts.turns.
+router.post('/transcript-turn', async (req, res) => {
+  res.sendStatus(200); // never block the agent
+
+  const secret = req.headers['x-internal-secret'];
+  if (secret !== process.env.INTERNAL_SECRET && process.env.INTERNAL_SECRET !== 'dev') return;
+
+  const { room_name, turn } = req.body || {};
+  if (!turn || !room_name || !turn.text) return;
+
+  try {
+    const { data: cl } = await supabase.from('call_logs')
+      .select('id').eq('livekit_room_name', room_name).maybeSingle();
+    if (!cl) return;
+
+    const turnText = `${(turn.role || '').toUpperCase()}: ${turn.text || ''}`;
+    // SQL JSONB append: insert if first turn, otherwise append to existing array
+    await supabase.query(
+      `INSERT INTO transcripts (call_id, turns, full_text)
+       VALUES ($1, $2::jsonb, $3)
+       ON CONFLICT (call_id) DO UPDATE SET
+         turns     = transcripts.turns || $2::jsonb,
+         full_text = CASE
+           WHEN transcripts.full_text IS NULL OR transcripts.full_text = ''
+           THEN $3
+           ELSE transcripts.full_text || E'\\n' || $3
+         END,
+         word_count = array_length(regexp_split_to_array(
+           COALESCE(transcripts.full_text,'') || ' ' || $3, '\\s+'), 1)`,
+      [cl.id, JSON.stringify([turn]), turnText]
+    );
+  } catch (e) {
+    console.warn('[LiveTranscript] append error:', e.message);
+  }
+});
+
 // POST /api/webhook/agent — Python agent sends transcript + analysis here
 router.post('/agent', async (req, res) => {
   // Internal secret check
@@ -203,7 +241,6 @@ router.post('/agent', async (req, res) => {
       const { error: txErr } = await supabase.from('transcripts').upsert({
         id: uuidv4(), call_id: cl.id, turns,
         full_text: textForSave,
-        word_count: textForSave.split(/\s+/).filter(Boolean).length,
       }, { onConflict: 'call_id' });
       if (txErr) console.error('[Webhook/Agent] transcript upsert error:', txErr.message);
       else console.log(`[Webhook/Agent] Transcript saved: ${turns.length} turns, ${textForSave.split(/\s+/).filter(Boolean).length} words`);
@@ -278,23 +315,144 @@ router.post('/livekit', async (req, res) => {
 // POST /api/webhook/paygic — payment confirmation
 router.post('/paygic', async (req, res) => {
   try {
-    const { order_id, payment_id, status, amount, user_id } = req.body;
-    if (status !== 'success' && status !== 'paid') return res.sendStatus(200);
+    const body = req.body;
+    // Paygic may send status as 'success', 'paid', or 'PAID'
+    const status = (body.status || '').toLowerCase();
+    if (status !== 'success' && status !== 'paid') {
+      console.log('[Webhook/Paygic] Non-success status:', status, '— ignoring');
+      return res.sendStatus(200);
+    }
 
     // Verify signature if configured
     const webhookSecret = process.env.PAYGIC_WEBHOOK_SECRET;
     if (webhookSecret) {
       const sig = req.headers['x-paygic-signature'];
-      const expected = crypto.createHmac('sha256', webhookSecret).update(JSON.stringify(req.body)).digest('hex');
-      if (sig !== expected) return res.status(401).json({ error: 'Invalid signature' });
+      const expected = crypto.createHmac('sha256', webhookSecret).update(JSON.stringify(body)).digest('hex');
+      if (sig && sig !== expected) {
+        console.warn('[Webhook/Paygic] Signature mismatch');
+        return res.status(401).json({ error: 'Invalid signature' });
+      }
     }
 
-    const amountInr = parseFloat(amount) / 100; // convert paise to INR
-    await addCredits(user_id, amountInr, order_id, payment_id);
+    // user_id can come as body.user_id, body.udf1, or inside body.metadata.user_id
+    const userId = body.user_id || body.udf1 || body.metadata?.user_id;
+    const orderId = body.order_id;
+    const paymentId = body.payment_id || body.transaction_id;
+    const amountPaise = parseFloat(body.amount || 0);
+    const amountInr = amountPaise >= 100 ? amountPaise / 100 : amountPaise; // handle both paise and INR
+
+    if (!userId) {
+      console.error('[Webhook/Paygic] Missing user_id in webhook body:', body);
+      return res.sendStatus(400);
+    }
+
+    console.log(`[Webhook/Paygic] Payment confirmed: order=${orderId} user=${userId} amount=₹${amountInr}`);
+    await addCredits(userId, amountInr, orderId, paymentId);
     res.sendStatus(200);
   } catch (err) {
     console.error('[Webhook/Paygic] Error:', err.message);
     res.sendStatus(500);
+  }
+});
+
+// ─── WHATSAPP CLOUD API — INBOUND MESSAGES ─────────────────────────────────────
+// Called by the n8n receive flow (not directly by Meta) with the raw Meta webhook
+// body forwarded as-is. Single-client MVP: WHATSAPP_USER_ID identifies which
+// Callora user these messages belong to (see .env) — becomes a real lookup (e.g.
+// by value.metadata.phone_number_id) if/when more than one client's numbers are
+// in play.
+router.post('/whatsapp/inbound', async (req, res) => {
+  const secret = req.headers['x-internal-secret'];
+  if (secret !== process.env.INTERNAL_SECRET && process.env.INTERNAL_SECRET !== 'dev') {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  res.sendStatus(200); // ack n8n immediately, process after
+
+  const userId = process.env.WHATSAPP_USER_ID;
+  if (!userId) { console.warn('[WhatsApp/inbound] WHATSAPP_USER_ID not configured'); return; }
+
+  try {
+    for (const entry of req.body?.entry || []) {
+      for (const change of entry.changes || []) {
+        const value = change.value || {};
+        const nameByWaId = Object.fromEntries((value.contacts || []).map(c => [c.wa_id, c.profile?.name]));
+        for (const msg of value.messages || []) {
+          const waId = msg.from;
+          const contact = await upsertContact(userId, waId, nameByWaId[waId]);
+          const conversation = await getOrCreateConversation(userId, contact.id);
+
+          const body = msg.text?.body || msg.button?.text || `[${msg.type}]`;
+          const waTimestamp = msg.timestamp ? new Date(parseInt(msg.timestamp, 10) * 1000).toISOString() : new Date().toISOString();
+
+          const saved = await insertMessage({
+            conversationId: conversation.id, userId, direction: 'inbound',
+            wamid: msg.id, body, messageType: msg.type || 'text', status: 'received',
+            rawPayload: msg, waTimestamp,
+          });
+          if (saved) await bumpConversation(conversation.id, { preview: body.slice(0, 120), at: waTimestamp, incrementUnread: true });
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[WhatsApp/inbound] error:', e.message);
+  }
+});
+
+// ─── WHATSAPP CLOUD API — STATUS UPDATES (sent/delivered/read/failed) ─────────
+router.post('/whatsapp/status', async (req, res) => {
+  const secret = req.headers['x-internal-secret'];
+  if (secret !== process.env.INTERNAL_SECRET && process.env.INTERNAL_SECRET !== 'dev') {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  res.sendStatus(200);
+
+  try {
+    for (const entry of req.body?.entry || []) {
+      for (const change of entry.changes || []) {
+        for (const status of change.value?.statuses || []) {
+          await updateMessageStatus(status.id, status.status);
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[WhatsApp/status] error:', e.message);
+  }
+});
+
+// ─── WHATSAPP CLOUD API — OUTBOUND SEND LOG ────────────────────────────────────
+// Called by the (modified) real_concept_whatsapp_bot n8n flow right after a
+// successful Graph API send, so outgoing messages show up in the same inbox.
+// Responds with real success/failure (unlike the two above) since this is the
+// definitive record that a send happened — worth n8n knowing if the log write itself failed.
+router.post('/whatsapp/outbound-log', async (req, res) => {
+  const secret = req.headers['x-internal-secret'];
+  if (secret !== process.env.INTERNAL_SECRET && process.env.INTERNAL_SECRET !== 'dev') {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const userId = process.env.WHATSAPP_USER_ID;
+  if (!userId) return res.status(500).json({ error: 'WHATSAPP_USER_ID not configured' });
+
+  try {
+    const { to, template_name, wamid, lead_name } = req.body || {};
+    if (!to || !wamid) return res.status(400).json({ error: 'to and wamid required' });
+
+    const contact = await upsertContact(userId, to, lead_name);
+    const conversation = await getOrCreateConversation(userId, contact.id);
+    const preview = `Template: ${template_name || 'unknown'}`;
+    const now = new Date().toISOString();
+
+    const saved = await insertMessage({
+      conversationId: conversation.id, userId, direction: 'outbound',
+      wamid, body: preview, messageType: 'template', status: 'sent',
+      rawPayload: req.body, waTimestamp: now,
+    });
+    if (saved) await bumpConversation(conversation.id, { preview, at: now, incrementUnread: false });
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error('[WhatsApp/outbound-log] error:', e.message);
+    res.status(500).json({ error: e.message });
   }
 });
 

@@ -50,12 +50,16 @@ const TO_ONE = {
   campaigns:   { agents: 'agent_id' },
   transcripts: { call_logs: 'call_id' },
   recordings:  { call_logs: 'call_id' },
+  whatsapp_conversations: { whatsapp_contacts: 'contact_id' },
+  whatsapp_messages:      { whatsapp_conversations: 'conversation_id' },
 };
 const TO_MANY = {
   leads:     { call_logs: 'lead_id' },
   campaigns: { leads: 'campaign_id' },
   agents:    { call_logs: 'agent_id', campaigns: 'agent_id' },
   call_logs: { transcripts: 'call_id', recordings: 'call_id' },
+  whatsapp_contacts:      { whatsapp_conversations: 'contact_id' },
+  whatsapp_conversations: { whatsapp_messages: 'conversation_id' },
 };
 
 // Parse a select string into { base: '*'|['col',...], embeds: [{name, cols}] }

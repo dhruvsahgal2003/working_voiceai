@@ -65,6 +65,7 @@ app.use('/api/settings',    require('./routes/settings'));
 app.use('/api/webhooks',    require('./routes/webhooks').router);
 app.use('/api/knowledge',   require('./routes/knowledge'));
 app.use('/api/admin',       require('./routes/admin'));
+app.use('/api/messages',    require('./routes/messages'));
 
 // ─── INTERNAL — Python agent fetches agent config ─────────────────────────────
 app.get('/api/internal/agent-config', async (req, res) => {
