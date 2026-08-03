@@ -76,4 +76,13 @@ async function updateMessageStatus(wamid, status) {
   await supabase.from('whatsapp_messages').update({ status }).eq('wamid', wamid);
 }
 
-module.exports = { normalizePhone, upsertContact, getOrCreateConversation, bumpConversation, insertMessage, updateMessageStatus };
+// WhatsApp only allows free-text replies within 24h of the contact's last inbound
+// message (Meta's customer-service-window rule, not ours) — used to gate sending.
+async function getLastInboundAt(conversationId) {
+  const { data } = await supabase.from('whatsapp_messages')
+    .select('wa_timestamp').eq('conversation_id', conversationId).eq('direction', 'inbound')
+    .order('wa_timestamp', { ascending: false }).limit(1).maybeSingle();
+  return data?.wa_timestamp || null;
+}
+
+module.exports = { normalizePhone, upsertContact, getOrCreateConversation, bumpConversation, insertMessage, updateMessageStatus, getLastInboundAt };
