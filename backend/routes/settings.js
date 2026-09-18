@@ -5,7 +5,10 @@ const axios = require('axios');
 const db = require('../services/supabase');
 const { requireAuth } = require('../middleware/auth');
 const { encrypt, decrypt } = require('../services/encryption');
-const { autoProvisionTrunk } = require('../services/livekit');
+const {
+  SECURE_TRUNKING, serializeProvision, parseProvision,
+  provisionPlivoZentrunk, teardownPlivoZentrunk, createLiveKitOutboundTrunk, deleteLiveKitTrunk,
+} = require('../services/livekit');
 
 router.use(requireAuth);
 
@@ -14,6 +17,7 @@ router.get('/credentials', async (req, res) => {
   try {
     const { data } = await db.from('user_credentials').select('*').eq('user_id', req.user.id).single();
     if (!data) return res.json({ credentials: {} });
+    const prov = parseProvision(data.livekit_url);
     res.json({
       credentials: {
         plivo_auth_id:    data.plivo_auth_id || '',
@@ -21,8 +25,9 @@ router.get('/credentials', async (req, res) => {
         sales_webhook_url: data.sales_webhook_url || '',
         sales_whatsapp:    data.sales_whatsapp || '',
         // Expose provisioning status — not the actual keys
-        sip_trunk_provisioned: !!data.livekit_url,
-        sip_trunk_id: data.livekit_url || '',
+        sip_trunk_provisioned: !!prov?.lk_trunk,
+        sip_trunk_id: prov?.lk_trunk || '',
+        from_number: prov?.from || '',
       },
     });
   } catch (err) {
@@ -45,7 +50,8 @@ router.put('/credentials', async (req, res) => {
 });
 
 // POST /api/settings/connect-plivo
-// One-click Plivo setup: validate → auto-provision SIP trunk → save everything
+// One-click plug-and-play: validate → provision Plivo Zentrunk outbound trunk +
+// SIP credential on the user's account → create matching LiveKit trunk → save.
 router.post('/connect-plivo', async (req, res) => {
   try {
     const { plivo_auth_id, plivo_auth_token } = req.body;
@@ -65,7 +71,7 @@ router.post('/connect-plivo', async (req, res) => {
       return res.status(400).json({ error: 'Invalid Plivo credentials — check your Auth ID and Token' });
     }
 
-    // ── Step 2: Fetch user's Plivo numbers (for trunk From numbers) ───────────
+    // ── Step 2: Fetch the account's Plivo numbers (caller IDs) ────────────────
     let plivoNumbers = [];
     try {
       const numResp = await axios.get(`https://api.plivo.com/v1/Account/${plivo_auth_id}/Number/`, {
@@ -75,53 +81,86 @@ router.post('/connect-plivo', async (req, res) => {
       plivoNumbers = (numResp.data?.objects || []).map(n =>
         n.number.startsWith('+') ? n.number : `+${n.number}`
       );
-    } catch {
-      // Numbers fetch is best-effort — trunk still works without them
+    } catch { /* best-effort */ }
+    if (!plivoNumbers.length) {
+      return res.status(400).json({
+        error: 'No phone numbers found on this Plivo account. Buy a number in Plivo first, then reconnect.',
+      });
     }
 
-    // ── Step 3: Auto-provision LiveKit SIP trunk (uses platform LiveKit keys) ─
+    // ── Step 3: Tear down any previous provisioning (clean re-connect) ────────
     const { data: existing } = await db.from('user_credentials')
       .select('livekit_url').eq('user_id', req.user.id).single();
-    const existingTrunkId = existing?.livekit_url || null;
+    const prevProv = parseProvision(existing?.livekit_url);
+    if (prevProv) {
+      await teardownPlivoZentrunk(plivo_auth_id, plivo_auth_token, prevProv.plivo_trunk, prevProv.cred_uuid);
+      await deleteLiveKitTrunk(prevProv.lk_trunk);
+    }
 
-    const trunkId = await autoProvisionTrunk(
-      req.user.id,
-      plivo_auth_id,
-      plivo_auth_token,
-      plivoNumbers,
-      existingTrunkId,
-    );
+    // ── Step 4: Provision Plivo Zentrunk (credential + outbound trunk) ────────
+    let pz;
+    try {
+      pz = await provisionPlivoZentrunk(plivo_auth_id, plivo_auth_token);
+    } catch (e) {
+      const detail = e.response?.data?.error || e.response?.data?.message || e.message;
+      console.error('[ConnectPlivo] Plivo Zentrunk error:', e.response?.data || e.message);
+      return res.status(400).json({ error: `Couldn't set up the SIP trunk on your Plivo account: ${detail}` });
+    }
 
-    // ── Step 4: Save credentials + trunk ID ──────────────────────────────────
-    const updates = {
+    // ── Step 5: Create the matching LiveKit outbound trunk ───────────────────
+    const fromNumber = plivoNumbers[0];
+    let lkTrunkId;
+    try {
+      lkTrunkId = await createLiveKitOutboundTrunk({
+        userId: req.user.id,
+        address: pz.trunkDomain,
+        numbers: plivoNumbers,
+        authUsername: pz.sipUser,
+        authPassword: pz.sipPass,
+        secure: SECURE_TRUNKING,
+      });
+    } catch (e) {
+      // Roll back the Plivo side so we don't leave orphaned trunks/credentials
+      await teardownPlivoZentrunk(plivo_auth_id, plivo_auth_token, pz.plivoTrunkId, pz.credentialUuid);
+      console.error('[ConnectPlivo] LiveKit trunk error:', e.message);
+      return res.status(500).json({ error: `Provisioned Plivo but failed to create the LiveKit trunk: ${e.message}` });
+    }
+
+    // ── Step 6: Persist the provisioning blob (JSON in livekit_url) ──────────
+    const provision = serializeProvision({
+      lk_trunk:    lkTrunkId,
+      plivo_trunk: pz.plivoTrunkId,
+      cred_uuid:   pz.credentialUuid,
+      sip_user:    pz.sipUser,
+      sip_pass_enc: encrypt(pz.sipPass),
+      from:        fromNumber,
+      domain:      pz.trunkDomain,
+      secure:      SECURE_TRUNKING,
+    });
+    await db.from('user_credentials').upsert({
       user_id: req.user.id,
       plivo_auth_id,
       plivo_auth_token_encrypted: encrypt(plivo_auth_token),
+      livekit_url: provision,
       updated_at: new Date().toISOString(),
-    };
-    if (trunkId) updates.livekit_url = trunkId;  // reuse livekit_url col for per-user SIP trunk ID
+    }, { onConflict: 'user_id' });
 
-    await db.from('user_credentials').upsert(updates, { onConflict: 'user_id' });
-
-    // ── Step 5: Sync numbers into phone_numbers table ─────────────────────────
+    // ── Step 7: Sync numbers into phone_numbers table ─────────────────────────
     let syncedCount = 0;
     for (const num of plivoNumbers) {
       await db.from('phone_numbers').upsert({
-        user_id: req.user.id,
-        number: num,
-        plivo_number_id: num,
-        country: 'IN',
-        is_active: true,
+        user_id: req.user.id, number: num, plivo_number_id: num, country: 'IN', is_active: true,
       }, { onConflict: 'number,user_id' });
       syncedCount++;
     }
 
-    console.log(`[ConnectPlivo] User ${req.user.id} — trunk: ${trunkId}, numbers synced: ${syncedCount}`);
+    console.log(`[ConnectPlivo] User ${req.user.id} — LK trunk ${lkTrunkId}, Plivo trunk ${pz.plivoTrunkId}, domain ${pz.trunkDomain}, from ${fromNumber}, numbers ${syncedCount}`);
     res.json({
       success: true,
       account_name: plivoAccount.account_type || 'Plivo Account',
       numbers_synced: syncedCount,
-      sip_trunk_provisioned: !!trunkId,
+      from_number: fromNumber,
+      sip_trunk_provisioned: true,
     });
   } catch (err) {
     console.error('[ConnectPlivo] Error:', err.message);
@@ -129,20 +168,23 @@ router.post('/connect-plivo', async (req, res) => {
   }
 });
 
-// POST /api/settings/disconnect-plivo — remove SIP trunk + wipe credentials
+// POST /api/settings/disconnect-plivo — tear down SIP trunks (both sides) + wipe creds
 router.post('/disconnect-plivo', async (req, res) => {
   try {
     const { data: creds } = await db.from('user_credentials')
-      .select('livekit_url').eq('user_id', req.user.id).single();
-    if (creds?.livekit_url) {
-      try {
-        const { SipClient } = require('livekit-server-sdk');
-        const sipClient = new SipClient(
-          process.env.LIVEKIT_URL, process.env.LIVEKIT_API_KEY, process.env.LIVEKIT_API_SECRET,
-        );
-        await sipClient.deleteSipTrunk(creds.livekit_url);
-        console.log(`[DisconnectPlivo] Deleted SIP trunk ${creds.livekit_url}`);
-      } catch (e) { console.warn('[DisconnectPlivo] Could not delete SIP trunk:', e.message); }
+      .select('livekit_url, plivo_auth_id, plivo_auth_token_encrypted').eq('user_id', req.user.id).single();
+    const prov = parseProvision(creds?.livekit_url);
+    if (prov) {
+      await deleteLiveKitTrunk(prov.lk_trunk);
+      if (creds?.plivo_auth_id && creds?.plivo_auth_token_encrypted && (prov.plivo_trunk || prov.cred_uuid)) {
+        try {
+          await teardownPlivoZentrunk(
+            creds.plivo_auth_id, decrypt(creds.plivo_auth_token_encrypted),
+            prov.plivo_trunk, prov.cred_uuid,
+          );
+        } catch (e) { console.warn('[DisconnectPlivo] Plivo teardown:', e.message); }
+      }
+      console.log(`[DisconnectPlivo] Torn down trunks for user ${req.user.id}`);
     }
     await db.from('user_credentials').upsert({
       user_id: req.user.id,

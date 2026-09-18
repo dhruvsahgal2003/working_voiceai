@@ -26,7 +26,13 @@ async function resolveUserTrunk(userId) {
 }
 
 // ─── TRIGGER CALL ─────────────────────────────────────────────────────────────
-async function triggerCall({ phone, name, city, propertyType, budget, language, leadId, userId }) {
+// roomName/callUuid may be supplied by the caller. They must be, on the real SIP
+// path: dialOutbound() blocks until the callee answers, and the agent POSTs
+// /api/internal/start-recording the moment it sees the SIP participant. If the
+// call_log row is only written after triggerCall() returns, a fast answer beats
+// the INSERT, that lookup 404s, and the call is never recorded at all. Letting
+// the caller pre-generate the identifiers lets it INSERT before dialling.
+async function triggerCall({ phone, name, city, propertyType, budget, language, leadId, userId, roomName: roomNameIn, callUuid: callUuidIn }) {
   if (process.env.LOAD_TEST_MODE === 'true') {
     // Explicit load-testing flag — deliberately separate from `isLocal` above, which
     // is keyed off real Plivo credentials being absent. Here real credentials ARE
@@ -85,8 +91,8 @@ async function triggerCall({ phone, name, city, propertyType, budget, language, 
   const { trunkId, fromNumber } = await resolveUserTrunk(userId);
   if (trunkId) {
     try {
-      const roomName = `call-${leadId}-${Date.now()}`;
-      const callUuid = `LK-${uuidv4().slice(0, 12)}`;
+      const roomName = roomNameIn || `call-${leadId}-${Date.now()}`;
+      const callUuid = callUuidIn || `LK-${uuidv4().slice(0, 12)}`;
       const metadata = { leadId, name, city, propertyType, budget, language, callUuid };
 
       // Create room first, then dispatch agent + dial in parallel.

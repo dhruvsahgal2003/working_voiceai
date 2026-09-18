@@ -111,7 +111,7 @@ router.post('/register', async (req, res) => {
       password_hash: passwordHash,
       name: name || '',
       company: company || '',
-      credit_balance: 500,
+      credit_balance: 120,
     }).select('id,email,name,company,credit_balance,created_at').single();
 
     if (error) {
@@ -129,8 +129,8 @@ router.post('/register', async (req, res) => {
     // Non-critical post-registration work — never block the response
     await tryDb(db.from('user_credentials').insert({ user_id: user.id }));
     await tryDb(db.from('events').insert({
-      user_id: user.id, type: 'account.created', title: 'Welcome to Callora!',
-      body: 'You have ₹500 free credits to get started. Configure your first assistant and launch a campaign.',
+      user_id: user.id, type: 'account.created', title: 'Welcome to Velryx!',
+      body: 'You have ₹120 free credits to get started. Configure your first assistant and launch a campaign.',
     }));
 
     // Seed template agents so new users see real examples
@@ -216,15 +216,15 @@ router.get('/google/callback', async (req, res) => {
         password_hash: '',
         name: profile.name || '',
         google_id: profile.sub,
-        credit_balance: 500,
+        credit_balance: 120,
         is_admin: isAdmin,
       }).select('*').single();
       if (error) throw error;
       user = newUser;
       await tryDb(db.from('user_credentials').insert({ user_id: user.id }));
       await tryDb(db.from('events').insert({
-        user_id: user.id, type: 'account.created', title: 'Welcome to Callora!',
-        body: 'You have ₹500 free credits. Configure your first assistant and launch a campaign.',
+        user_id: user.id, type: 'account.created', title: 'Welcome to Velryx!',
+        body: 'You have ₹120 free credits. Configure your first assistant and launch a campaign.',
       }));
       try { await seedTemplateAgents(user.id); } catch (_) {}
     } else if (!user.google_id) {

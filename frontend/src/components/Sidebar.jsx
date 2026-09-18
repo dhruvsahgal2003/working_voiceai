@@ -1,31 +1,31 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { useAuth } from '../context/AuthContext';
 import {
   LayoutDashboard, Users, BarChart2, Settings, Bot, CreditCard,
-  Hash, LogOut, Zap, PhoneCall, Book, Shield
+  Hash, LogOut, Zap, PhoneCall, Book, Shield, X, MessageSquare
 } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
 
 const NAV = [
-  { label: 'Overview', items: [
-    { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-    { to: '/analytics', icon: BarChart2, label: 'Analytics' },
+  { section: 'Overview', items: [
+    { to: '/dashboard', Icon: LayoutDashboard, label: 'Dashboard' },
+    { to: '/analytics', Icon: BarChart2,       label: 'Analytics' },
   ]},
-  { label: 'Voice AI', items: [
-    { to: '/assistants', icon: Bot, label: 'Assistants' },
-    { to: '/campaigns', icon: Zap, label: 'Campaigns' },
-    { to: '/leads', icon: Users, label: 'Leads' },
-    { to: '/history', icon: PhoneCall, label: 'History' },
+  { section: 'Voice AI', items: [
+    { to: '/assistants', Icon: Bot,           label: 'Assistants' },
+    { to: '/campaigns',  Icon: Zap,           label: 'Campaigns' },
+    { to: '/leads',      Icon: Users,         label: 'Leads' },
+    { to: '/history',    Icon: PhoneCall,     label: 'Call History' },
+    { to: '/messages',   Icon: MessageSquare, label: 'Messages' },
   ]},
-  { label: 'Configure', items: [
-    { to: '/knowledge', icon: Book, label: 'Knowledge Base' },
-    { to: '/numbers', icon: Hash, label: 'Numbers' },
-    { to: '/billing', icon: CreditCard, label: 'Billing' },
-    { to: '/settings', icon: Settings, label: 'Settings' },
+  { section: 'Configure', items: [
+    { to: '/knowledge', Icon: Book,      label: 'Knowledge Base' },
+    { to: '/numbers',   Icon: Hash,      label: 'Numbers' },
+    { to: '/billing',   Icon: CreditCard,label: 'Billing' },
+    { to: '/settings',  Icon: Settings,  label: 'Settings' },
   ]},
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ isOpen, onClose }) {
   const { pathname } = useLocation();
   const { user, logout } = useAuth();
   const nav = useNavigate();
@@ -41,42 +41,63 @@ export default function Sidebar() {
   const balance = user?.credit_balance ?? 0;
   const isAdmin = user?.is_admin;
 
+  function handleLinkClick() {
+    if (onClose) onClose();
+  }
+
   return (
-    <aside className="sidebar">
-      <div className="sidebar-logo">
-        <div className="sidebar-logo-mark">
-          <motion.div
-            className="sidebar-logo-icon"
-            whileHover={{ scale: 1.05 }}
-          >C</motion.div>
-          <span className="sidebar-logo-name">Callora</span>
-        </div>
-        <div className="sidebar-logo-sub">AI Voice Platform</div>
+    <aside className={`vx-sidebar${isOpen ? ' open' : ''}`}>
+
+      {/* Brand row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingBottom: 18, borderBottom: '1px solid var(--border)', marginBottom: 14 }}>
+        <Link
+          to="/dashboard"
+          onClick={handleLinkClick}
+          style={{ display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none', flex: 1 }}
+        >
+          <div style={{
+            width: 30, height: 30, borderRadius: 8,
+            background: 'var(--grad-brand)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontWeight: 800, fontSize: 14, color: '#fff', flexShrink: 0,
+          }}>V</div>
+          <div>
+            <div className="vx-side-brand-name">Velryx</div>
+            <div style={{ fontSize: 10, color: 'var(--ink-300)', marginTop: 1, letterSpacing: '0.03em' }}>AI Voice Platform</div>
+          </div>
+        </Link>
+        {/* Close button — only visible on mobile */}
+        <button className="btn btn-ghost btn-icon vx-sidebar-close" onClick={onClose} title="Close menu">
+          <X size={16} />
+        </button>
       </div>
 
-      <nav className="sidebar-nav">
+      {/* Nav sections */}
+      <nav style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 0 }}>
         {NAV.map(section => (
-          <div key={section.label} style={{ marginBottom: 6 }}>
-            <span className="sidebar-section-label">{section.label}</span>
-            {section.items.map((item, i) => (
-              <motion.div
+          <div key={section.section}>
+            <div className="vx-side-section">{section.section}</div>
+            {section.items.map(item => (
+              <Link
                 key={item.to}
-                initial={{ opacity: 0, x: -8 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: i * 0.03 }}
+                to={item.to}
+                onClick={handleLinkClick}
+                className={`vx-side-link${isActive(item.to) ? ' active' : ''}`}
               >
-                <Link to={item.to} className={`nav-item${isActive(item.to) ? ' active' : ''}`}>
-                  <item.icon size={15} />
-                  {item.label}
-                </Link>
-              </motion.div>
+                <item.Icon size={15} />
+                {item.label}
+              </Link>
             ))}
           </div>
         ))}
         {isAdmin && (
-          <div style={{ marginTop: 8 }}>
-            <span className="sidebar-section-label">Admin</span>
-            <Link to="/admin" className={`nav-item${pathname === '/admin' ? ' active' : ''}`}>
+          <div>
+            <div className="vx-side-section">Admin</div>
+            <Link
+              to="/admin"
+              onClick={handleLinkClick}
+              className={`vx-side-link${pathname === '/admin' ? ' active' : ''}`}
+            >
               <Shield size={15} />
               Admin Panel
             </Link>
@@ -84,26 +105,34 @@ export default function Sidebar() {
         )}
       </nav>
 
-      <div className="sidebar-footer">
-        <div className="sidebar-user">
-          <div className="sidebar-avatar">{initials}</div>
-          <div className="sidebar-user-info">
-            <div className="sidebar-user-name">{user?.name || user?.email || 'User'}</div>
-            <div className="sidebar-user-email">{user?.email}</div>
+      {/* User footer */}
+      <div className="vx-side-footer">
+        <div className="vx-user">
+          <div className="vx-avatar">{initials}</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink-900)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {user?.name || user?.email || 'User'}
+            </div>
+            <div style={{ fontSize: 10.5, color: 'var(--ink-300)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>
+              {user?.email}
+            </div>
           </div>
-          <button className="btn btn-ghost btn-icon-sm" onClick={() => { logout(); nav('/login'); }} title="Logout">
+          <button className="btn btn-ghost btn-icon btn-sm" onClick={() => { logout(); nav('/login'); }} title="Sign out" style={{ flexShrink: 0 }}>
             <LogOut size={13} />
           </button>
         </div>
-        <motion.div
-          className="sidebar-credit-pill"
-          onClick={() => nav('/billing')}
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
+        <div
+          className="vx-side-link"
+          onClick={() => { nav('/billing'); handleLinkClick(); }}
+          style={{
+            marginTop: 6, justifyContent: 'center', gap: 6, fontWeight: 600, cursor: 'pointer',
+            background: 'linear-gradient(135deg, rgba(230,57,70,0.10), rgba(244,178,51,0.10))',
+            border: '1px solid rgba(230,57,70,0.20)', borderRadius: 10,
+          }}
         >
           <CreditCard size={11} />
           ₹{Number(balance).toFixed(0)} credits
-        </motion.div>
+        </div>
       </div>
     </aside>
   );

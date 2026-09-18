@@ -52,6 +52,14 @@ const LLM_MODELS = [
   { value: 'gpt-4o',                  label: 'GPT-4o',                 badge: 'Premium · Best quality' },
 ];
 
+// Friendly display labels for agent card badges (no internal model names)
+const LLM_BADGE = {
+  'llama-3.1-8b-instant': 'Fast AI', 'llama-3.3-70b-versatile': 'AI',
+  'sarvam-m': 'Hindi AI', 'sarvam-30b': 'AI 30B', 'sarvam-105b': 'AI 105B',
+  'gpt-4o-mini': 'GPT-4o Mini', 'gpt-4o': 'GPT-4o',
+  'gemini-2.5-flash-native-audio-preview-12-2025': 'Gemini Live',
+};
+
 // Gemini Live voices (used only when a realtime model is selected)
 const GEMINI_VOICES = [
   { value: 'Aoede',   label: 'Aoede',   gender: 'F', note: 'Warm, conversational' },
@@ -228,33 +236,234 @@ function AIWizard({ onClose, onDone }) {
 }
 
 // ── PROMPT TAB ─────────────────────────────────────────────────────────────────
-function PromptTab({ form, update }) {
+
+const BLANK_SPEC = (language) => ({
+  persona: { agent_name: '', company: '', role: '', tone: '' },
+  language: {
+    primary: (language || '').startsWith('hi') ? 'hi' : 'en',
+    script: (language || '').startsWith('hi') ? 'devanagari' : 'latin',
+    roman_terms: [],
+  },
+  goal: '',
+  opening_line: '',
+  facts: [{ label: '', value: '' }],
+  deflections: [{ when: '', say: '' }],
+  closing: { success: '', not_interested: '' },
+  constraints: { max_words_per_reply: 15 },
+});
+
+const hint = { fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 };
+const rowStyle = { display: 'flex', gap: 8, marginBottom: 6, alignItems: 'center' };
+
+function SectionTitle({ children, note }) {
   return (
-    <div style={{ maxWidth: 780 }}>
-      <div className="form-group">
-        <label className="form-label">First Message</label>
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
-          The first thing the agent says when the call connects.{' '}
-          Variables:{' '}
-          {['{{name}}', '{{city}}', '{{budget}}', '{{property_type}}'].map(v => (
-            <code key={v} style={{ fontSize: 11, background: 'var(--bg)', padding: '1px 5px', borderRadius: 4, marginRight: 4 }}>{v}</code>
-          ))}
-          {' '}are replaced with lead data.
+    <div style={{ marginBottom: 8 }}>
+      <div className="settings-section-title" style={{ marginBottom: 2 }}>{children}</div>
+      {note && <div style={hint}>{note}</div>}
+    </div>
+  );
+}
+
+/** Repeatable {a, b} rows — used for both facts and deflections. */
+function PairRows({ rows, onChange, aKey, bKey, aPlaceholder, bPlaceholder, addLabel }) {
+  const set = (i, key, val) => onChange(rows.map((r, j) => (j === i ? { ...r, [key]: val } : r)));
+  return (
+    <>
+      {rows.map((r, i) => (
+        <div key={i} style={rowStyle}>
+          <input className="form-input" style={{ flex: '0 0 30%' }} placeholder={aPlaceholder}
+            value={r[aKey] || ''} onChange={e => set(i, aKey, e.target.value)} />
+          <input className="form-input" style={{ flex: 1 }} placeholder={bPlaceholder}
+            value={r[bKey] || ''} onChange={e => set(i, bKey, e.target.value)} />
+          <button className="btn btn-ghost btn-sm" style={{ color: 'var(--red)', flexShrink: 0 }}
+            onClick={() => onChange(rows.filter((_, j) => j !== i))}><X size={13} /></button>
         </div>
-        <textarea className="form-textarea" style={{ minHeight: 72 }}
-          placeholder="e.g. Namaste {{name}} ji! Main Riya bol rahi hoon Real Concept se. Kya aap abhi baat kar sakte hain?"
-          value={form.first_message || ''}
-          onChange={e => update('first_message', e.target.value)} />
+      ))}
+      <button className="btn btn-secondary btn-sm" style={{ marginBottom: 18 }}
+        onClick={() => onChange([...rows, { [aKey]: '', [bKey]: '' }])}>
+        <Plus size={13} /> {addLabel}
+      </button>
+    </>
+  );
+}
+
+function PromptTab({ form, update }) {
+  const { showToast } = useToast();
+  const spec = form.prompt_spec || null;
+  const [compiled, setCompiled] = useState(form.system_prompt || '');
+  const [converting, setConverting] = useState(false);
+
+  // Preview what the model will actually receive. Debounced because it runs on
+  // every keystroke; the endpoint is a pure function so there is nothing to undo.
+  useEffect(() => {
+    if (!spec) return;
+    const t = setTimeout(() => {
+      api.agents.compilePrompt(spec)
+        .then(d => setCompiled(d.system_prompt))
+        .catch(() => {});
+    }, 350);
+    return () => clearTimeout(t);
+  }, [spec]);
+
+  const setSpec = (patch) => update('prompt_spec', { ...spec, ...patch });
+  const setIn = (section, key, val) => setSpec({ [section]: { ...(spec[section] || {}), [key]: val } });
+
+  async function convertFromText() {
+    if (!form.system_prompt?.trim()) return showToast('Nothing to convert — write a prompt first', 'error');
+    setConverting(true);
+    try {
+      const d = await api.agents.parsePrompt({ system_prompt: form.system_prompt, language: form.language });
+      update('prompt_spec', d.prompt_spec);
+      setCompiled(d.system_prompt);
+      showToast('Converted — check the fields, then Save', 'success');
+    } catch (err) { showToast(err.message, 'error'); }
+    finally { setConverting(false); }
+  }
+
+  const firstMessage = (
+    <div className="form-group">
+      <label className="form-label">First Message</label>
+      <div style={hint}>
+        The first thing the agent says when the call connects.{' '}
+        Variables:{' '}
+        {['{{name}}', '{{city}}', '{{budget}}', '{{property_type}}'].map(v => (
+          <code key={v} style={{ fontSize: 11, background: 'var(--bg)', padding: '1px 5px', borderRadius: 4, marginRight: 4 }}>{v}</code>
+        ))}
+        {' '}are replaced with lead data.
       </div>
-      <div className="form-group">
-        <label className="form-label">System Prompt / Script</label>
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
-          Full instructions for the agent. Variables <code style={{ fontSize: 11, background: 'var(--bg)', padding: '1px 5px', borderRadius: 4 }}>{`{{name}}`}</code>, <code style={{ fontSize: 11, background: 'var(--bg)', padding: '1px 5px', borderRadius: 4 }}>{`{{city}}`}</code>, <code style={{ fontSize: 11, background: 'var(--bg)', padding: '1px 5px', borderRadius: 4 }}>{`{{budget}}`}</code> are auto-filled from lead data.
+      <textarea className="form-textarea" style={{ minHeight: 72 }}
+        placeholder="e.g. नमस्ते {{name}} जी! मैं Riya बोल रही हूं Real Concept से।"
+        value={form.first_message || ''}
+        onChange={e => update('first_message', e.target.value)} />
+    </div>
+  );
+
+  // ── Legacy free-text mode ──
+  if (!spec) {
+    return (
+      <div style={{ maxWidth: 780 }}>
+        {firstMessage}
+        <div className="form-group">
+          <label className="form-label">System Prompt / Script</label>
+          <div style={hint}>
+            Free-text prompt. Switching to structured fields is strongly recommended: the
+            compiler enforces one-sentence replies, stops the agent repeating itself, and
+            tells it the caller's number is already on file.
+          </div>
+          <textarea className="form-textarea" style={{ minHeight: 380, fontSize: 13, lineHeight: 1.65 }}
+            placeholder="## Objective&#10;You are Priya, a lead qualification agent for ABC Company...&#10;&#10;## Conversation Script&#10;Step 1: Opening..."
+            value={form.system_prompt || ''}
+            onChange={e => update('system_prompt', e.target.value)} />
         </div>
-        <textarea className="form-textarea" style={{ minHeight: 440, fontSize: 13, lineHeight: 1.65 }}
-          placeholder="## Objective&#10;You are Priya, a lead qualification agent for ABC Company...&#10;&#10;## Conversation Script&#10;Step 1: Opening..."
-          value={form.system_prompt || ''}
-          onChange={e => update('system_prompt', e.target.value)} />
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-primary btn-sm" onClick={convertFromText} disabled={converting}>
+            {converting ? <span className="spinner spinner-sm" /> : <><Sparkles size={13} /> Convert to structured</>}
+          </button>
+          <button className="btn btn-secondary btn-sm"
+            onClick={() => update('prompt_spec', BLANK_SPEC(form.language))}>
+            <Plus size={13} /> Start structured from scratch
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Structured mode ──
+  const p = spec.persona || {};
+  const lang = spec.language || {};
+  const closing = spec.closing || {};
+  const constraints = spec.constraints || {};
+
+  return (
+    <div style={{ maxWidth: 820 }}>
+      {firstMessage}
+
+      <div className="settings-section">
+        <SectionTitle note="Who the agent is. The greeting has already happened, so it will not re-introduce itself.">Identity</SectionTitle>
+        <div style={rowStyle}>
+          <input className="form-input" style={{ flex: 1 }} placeholder="Agent name, e.g. Priya"
+            value={p.agent_name || ''} onChange={e => setIn('persona', 'agent_name', e.target.value)} />
+          <input className="form-input" style={{ flex: 1 }} placeholder="Company, e.g. Real Concept"
+            value={p.company || ''} onChange={e => setIn('persona', 'company', e.target.value)} />
+        </div>
+        <div style={rowStyle}>
+          <input className="form-input" style={{ flex: 1 }} placeholder="Role, e.g. sales executive"
+            value={p.role || ''} onChange={e => setIn('persona', 'role', e.target.value)} />
+          <input className="form-input" style={{ flex: 1 }} placeholder="Tone, e.g. casual and friendly"
+            value={p.tone || ''} onChange={e => setIn('persona', 'tone', e.target.value)} />
+        </div>
+      </div>
+
+      <div className="settings-section">
+        <SectionTitle note="Devanagari is required for Hindi — the voice engine reads Roman Hindi with English pronunciation. Terms below stay in Latin script.">Language</SectionTitle>
+        <div style={rowStyle}>
+          <select className="form-select" style={{ flex: '0 0 220px' }} value={lang.script || 'latin'}
+            onChange={e => setIn('language', 'script', e.target.value)}>
+            <option value="devanagari">Hindi — Devanagari script</option>
+            <option value="latin">English — Latin script</option>
+          </select>
+          <input className="form-input" style={{ flex: 1 }}
+            placeholder="Keep in Roman: WhatsApp, 3BHK, RERA"
+            value={(lang.roman_terms || []).join(', ')}
+            onChange={e => setIn('language', 'roman_terms', e.target.value.split(',').map(s => s.trim()).filter(Boolean))} />
+        </div>
+      </div>
+
+      <div className="settings-section">
+        <SectionTitle>Goal</SectionTitle>
+        <textarea className="form-textarea" style={{ minHeight: 60, marginBottom: 14 }}
+          placeholder="e.g. Property की short pitch दीजिए और सवालों के जवाब दीजिए।"
+          value={spec.goal || ''} onChange={e => setSpec({ goal: e.target.value })} />
+
+        <SectionTitle note="The single line the agent opens with after the greeting. Keep it to one sentence.">Opening line</SectionTitle>
+        <textarea className="form-textarea" style={{ minHeight: 60 }}
+          placeholder="e.g. Elaira Residences — 5.5 acre की premium township है। details भेज दूं?"
+          value={spec.opening_line || ''} onChange={e => setSpec({ opening_line: e.target.value })} />
+      </div>
+
+      <div className="settings-section">
+        <SectionTitle note="The only things the agent is allowed to state. It is told never to invent a price, size or amenity beyond these.">Facts</SectionTitle>
+        <PairRows rows={spec.facts || []} onChange={v => setSpec({ facts: v })}
+          aKey="label" bKey="value" aPlaceholder="Project" bPlaceholder="Conscient Elaira Residences, 5.5 acre township"
+          addLabel="Add fact" />
+      </div>
+
+      <div className="settings-section">
+        <SectionTitle note="What to say when it does not know. Each of these is automatically limited to once per call, which is what stops the endless 'WhatsApp पर भेज दूं' loop.">Deflections</SectionTitle>
+        <PairRows rows={spec.deflections || []} onChange={v => setSpec({ deflections: v })}
+          aKey="when" bKey="say" aPlaceholder="price, floor plan" bPlaceholder="वो details मैं WhatsApp पर भेज देती हूं"
+          addLabel="Add deflection" />
+      </div>
+
+      <div className="settings-section">
+        <SectionTitle note="Saying either of these ends the call — the agent hangs up a few seconds later.">Closing</SectionTitle>
+        <input className="form-input" style={{ marginBottom: 6 }} placeholder="On success, e.g. मैं WhatsApp पर floor plans भेज देती हूं।"
+          value={closing.success || ''} onChange={e => setIn('closing', 'success', e.target.value)} />
+        <input className="form-input" placeholder="If not interested, e.g. कोई बात नहीं, ज़रूरत हो तो हम यहाँ हैं।"
+          value={closing.not_interested || ''} onChange={e => setIn('closing', 'not_interested', e.target.value)} />
+      </div>
+
+      <div className="settings-section">
+        <SectionTitle>Limits</SectionTitle>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <span style={{ fontSize: 13 }}>Max words per reply</span>
+          <input className="form-input" type="number" min={5} max={40} style={{ width: 90 }}
+            value={constraints.max_words_per_reply ?? 15}
+            onChange={e => setIn('constraints', 'max_words_per_reply', parseInt(e.target.value) || 15)} />
+        </div>
+      </div>
+
+      <div className="settings-section">
+        <SectionTitle note="Generated from the fields above — this exact text is what the model receives. Edit the fields, not the text.">Compiled prompt</SectionTitle>
+        <pre style={{
+          background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8,
+          padding: 14, fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap',
+          maxHeight: 360, overflowY: 'auto', color: 'var(--text-muted)', margin: 0,
+        }}>{compiled}</pre>
+        <button className="btn btn-ghost btn-sm" style={{ marginTop: 8 }}
+          onClick={() => update('prompt_spec', null)}>
+          Switch back to free text
+        </button>
       </div>
     </div>
   );
@@ -414,6 +623,85 @@ function CallTab({ form, update }) {
             onChange={e => update('end_call_phrases', e.target.value)} />
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>When the agent hears these phrases it ends the call</div>
         </div>
+      </div>
+
+      <div className="settings-section">
+        <div className="settings-section-title">Not Interested</div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 14, marginBottom: 12 }}>
+          <input type="checkbox" checked={form.hangup_on_not_interested !== false}
+            onChange={e => update('hangup_on_not_interested', e.target.checked)}
+            style={{ width: 16, height: 16, accentColor: 'var(--accent)' }} />
+          Hang up when the caller says they are not interested
+        </label>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 14 }}>
+          The agent says a closing line first, then ends the call — instead of staying on until the max-duration cap.
+        </div>
+        {form.hangup_on_not_interested !== false && (
+          <>
+            <div className="form-group">
+              <label className="form-label">Closing Line <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(blank = default)</span></label>
+              <input className="form-input"
+                placeholder="Bilkul, koi baat nahi. Aapka time dene ke liye dhanyavaad. Namaste!"
+                value={form.not_interested_message || ''}
+                onChange={e => update('not_interested_message', e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Extra Phrases <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(comma-separated, optional)</span></label>
+              <input className="form-input"
+                placeholder="budget nahi hai, abhi nahi soch rahe"
+                value={typeof form.not_interested_phrases === 'string' ? form.not_interested_phrases : (form.not_interested_phrases || []).join(', ')}
+                onChange={e => update('not_interested_phrases', e.target.value)} />
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>Added on top of the built-in Hindi and English phrases</div>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="settings-section">
+        <div className="settings-section-title">Transfer to a Human</div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 14, marginBottom: 12 }}>
+          <input type="checkbox" checked={!!form.transfer_enabled}
+            onChange={e => update('transfer_enabled', e.target.checked)}
+            style={{ width: 16, height: 16, accentColor: 'var(--accent)' }} />
+          Offer to transfer the caller to a human
+        </label>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 14 }}>
+          When the caller asks for a person, the agent offers to connect them and transfers the call if they accept.
+        </div>
+        {form.transfer_enabled && (
+          <>
+            <div className="form-group">
+              <label className="form-label">Transfer to Number <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(E.164, e.g. +919876543210)</span></label>
+              <input className="form-input" placeholder="+919876543210"
+                value={form.transfer_phone_number || ''}
+                onChange={e => update('transfer_phone_number', e.target.value)} />
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                Blank uses the platform default. If neither is set, transfers are refused rather than dialling a wrong number.
+              </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">What It Asks First</label>
+              <input className="form-input"
+                placeholder="Kya main aapki call ek human colleague ko transfer kar doon?"
+                value={form.transfer_prompt || ''}
+                onChange={e => update('transfer_prompt', e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">What It Says While Connecting</label>
+              <input className="form-input"
+                placeholder="Theek hai, main abhi aapko connect kar rahi hoon. Ek moment."
+                value={form.transfer_message || ''}
+                onChange={e => update('transfer_message', e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Extra Trigger Phrases <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(comma-separated, optional)</span></label>
+              <input className="form-input"
+                placeholder="senior se baat, manager se baat"
+                value={typeof form.transfer_trigger_phrases === 'string' ? form.transfer_trigger_phrases : (form.transfer_trigger_phrases || []).join(', ')}
+                onChange={e => update('transfer_trigger_phrases', e.target.value)} />
+            </div>
+          </>
+        )}
       </div>
 
       <div className="settings-section">
@@ -719,15 +1007,28 @@ function AgentDetail({ agent: initialAgent, onBack, onSave, onDelete }) {
   const isNew = initialAgent.id === '__new__';
 
   async function handleSave() {
-    if (!form.name || !form.system_prompt) return showToast('Name and system prompt are required', 'error');
+    // In structured mode system_prompt is derived from prompt_spec by the
+    // backend compiler, so the spec alone is enough to satisfy this.
+    if (!form.name || !(form.system_prompt || form.prompt_spec)) {
+      return showToast('Name and a prompt (or prompt spec) are required', 'error');
+    }
     setSaving(true);
     try {
+      const toList = v => typeof v === 'string'
+        ? v.split(',').map(s => s.trim()).filter(Boolean)
+        : (v || []);
       const payload = {
         ...form,
-        end_call_phrases: typeof form.end_call_phrases === 'string'
-          ? form.end_call_phrases.split(',').map(s => s.trim()).filter(Boolean)
-          : form.end_call_phrases,
+        end_call_phrases: toList(form.end_call_phrases),
+        not_interested_phrases: toList(form.not_interested_phrases),
+        transfer_trigger_phrases: toList(form.transfer_trigger_phrases),
+        // '' would fail the E.164 check server-side; null means "use the default".
+        transfer_phone_number: (form.transfer_phone_number || '').trim() || null,
       };
+      if (payload.transfer_enabled && payload.transfer_phone_number &&
+          !/^\+[1-9]\d{7,14}$/.test(payload.transfer_phone_number)) {
+        throw new Error('Transfer number must be E.164, e.g. +919876543210');
+      }
       const res = isNew ? await api.agents.create(payload) : await api.agents.update(initialAgent.id, payload);
       setForm(res.agent);
       setDirty(false);
@@ -911,8 +1212,8 @@ export default function Assistants() {
                 {a.system_prompt}
               </p>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-                <span className="badge badge-purple"><Cpu size={10} /> {a.llm_model}</span>
-                <span className="badge badge-blue"><Mic size={10} /> {a.stt_model}</span>
+                <span className="badge badge-purple"><Cpu size={10} /> {LLM_BADGE[a.llm_model] || 'AI'}</span>
+                <span className="badge badge-blue"><Mic size={10} /> Voice</span>
                 <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-dim)' }}>{a.max_duration_minutes}m max · Click to edit</span>
               </div>
             </div>

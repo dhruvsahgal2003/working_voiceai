@@ -60,7 +60,10 @@ export const api = {
     timeline: id => req('GET', `/leads/${id}/timeline`),
   },
   calls: {
-    trigger: leadId => req('POST', '/calls/trigger', { lead_id: leadId }),
+    // agentId is optional: omit it and the backend resolves the agent from the
+    // lead, then the campaign, then the most recent agent (routes/calls.js).
+    trigger: (leadId, agentId) => req('POST', '/calls/trigger',
+      agentId ? { lead_id: leadId, agent_id: agentId } : { lead_id: leadId }),
     list: (p = {}) => req('GET', `/calls/history?${new URLSearchParams(p)}`),
     history: (p = {}) => req('GET', `/calls/history?${new URLSearchParams(p)}`),
     get: id => req('GET', `/calls/${id}`),
@@ -106,6 +109,8 @@ export const api = {
     update: (id, d) => req('PATCH', `/agents/${id}`, d),
     delete: id => req('DELETE', `/agents/${id}`),
     generatePrompt: d => req('POST', '/agents/generate-prompt', d),
+    compilePrompt: prompt_spec => req('POST', '/agents/compile-prompt', { prompt_spec }),
+    parsePrompt: d => req('POST', '/agents/parse-prompt', d),
   },
   dnc: {
     list: () => req('GET', '/dnc'),
@@ -159,10 +164,20 @@ export const api = {
       return req('POST', '/knowledge/upload', fd, { noJson: true });
     },
   },
+  messages: {
+    conversations: () => req('GET', '/messages/conversations'),
+    thread: id => req('GET', `/messages/conversations/${id}/messages`),
+    markRead: id => req('POST', `/messages/conversations/${id}/read`),
+    send: (id, text) => req('POST', `/messages/conversations/${id}/send`, { text }),
+  },
   admin: {
     stats: () => req('GET', '/admin/stats'),
+    daily: () => req('GET', '/admin/daily'),
+    recharges: () => req('GET', '/admin/recharges'),
     users: (p = {}) => req('GET', `/admin/users?${new URLSearchParams(p)}`),
     updateUser: (id, d) => req('PATCH', `/admin/users/${id}`, d),
     addCredits: (id, amount) => req('POST', `/admin/users/${id}/credits`, { amount }),
+    apiKeys: () => req('GET', '/admin/api-keys'),
+    checkApiKeys: provider => req('POST', '/admin/api-keys/check', provider ? { provider } : {}),
   },
 };

@@ -19,7 +19,7 @@ function LPNav() {
     <nav className="lp-nav">
       <Link to="/" className="lp-nav-logo">
         <div className="lp-nav-logo-icon">C</div>
-        Callora
+        Velryx
       </Link>
       <div className="lp-nav-links">
         <Link to="/">Home</Link>
@@ -43,21 +43,21 @@ export default function About() {
       <section className="lp-hero" style={{ padding: '72px 5% 64px' }}>
         <div className="lp-hero-badge">Our story</div>
         <h1>We're making <span>every sales call</span><br />count more</h1>
-        <p>Callora was built by a team that spent years watching real estate salespeople burn out on manual dialing. There had to be a better way.</p>
+        <p>Velryx was built by a team that spent years watching real estate salespeople burn out on manual dialing. There had to be a better way.</p>
       </section>
 
       {/* STORY */}
       <section className="lp-section" style={{ maxWidth: 800, margin: '0 auto' }}>
         <div className="lp-section-label">Our story</div>
-        <h2>Why we built Callora</h2>
+        <h2>Why we built Velryx</h2>
         <p style={{ fontSize: 16, color: '#374151', lineHeight: 1.8, marginBottom: 20 }}>
           In 2023, our co-founder Arjun was consulting for a top-5 Mumbai developer. Their 40-person sales team was making 200 manual calls per day — and only reaching 30% of their list. The rest: voicemails, no answers, wrong numbers. ₹8 lakhs/month in salaries for a team mostly dialing into the void.
         </p>
         <p style={{ fontSize: 16, color: '#374151', lineHeight: 1.8, marginBottom: 20 }}>
-          He partnered with Sneha, who had spent years building conversational AI systems. Together they built the first version of Callora in 6 weeks. The developer ran it on a 5,000-lead campaign. The AI handled the first touch for all 5,000 — qualified 380 hot leads, scheduled 94 site visits. In 4 days.
+          He partnered with Sneha, who had spent years building conversational AI systems. Together they built the first version of Velryx in 6 weeks. The developer ran it on a 5,000-lead campaign. The AI handled the first touch for all 5,000 — qualified 380 hot leads, scheduled 94 site visits. In 4 days.
         </p>
         <p style={{ fontSize: 16, color: '#374151', lineHeight: 1.8 }}>
-          We've been building in the open ever since. Today Callora processes millions of calls a month for real estate teams across India.
+          We've been building in the open ever since. Today Velryx processes millions of calls a month for real estate teams across India.
         </p>
       </section>
 
@@ -106,7 +106,7 @@ export default function About() {
       {/* FOOTER */}
       <footer className="lp-footer">
         <div className="lp-footer-bottom" style={{ borderTop: 'none', paddingTop: 0 }}>
-          <span>© 2025 Callora AI. All rights reserved.</span>
+          <span>© 2025 Velryx AI. All rights reserved.</span>
           <div style={{ display: 'flex', gap: 20 }}>
             <Link to="/" style={{ color: 'rgba(255,255,255,0.45)', textDecoration: 'none', fontSize: 13 }}>Home</Link>
             <Link to="/pricing" style={{ color: 'rgba(255,255,255,0.45)', textDecoration: 'none', fontSize: 13 }}>Pricing</Link>

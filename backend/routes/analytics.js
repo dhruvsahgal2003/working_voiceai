@@ -65,7 +65,8 @@ router.get('/daily', async (req, res) => {
 
     const byDate = {};
     (data || []).forEach(c => {
-      const date = c.created_at.split('T')[0];
+      // created_at may be a Date object (pg) or an ISO string — normalise both
+      const date = new Date(c.created_at).toISOString().split('T')[0];
       if (!byDate[date]) byDate[date] = { date, calls: 0, hot_leads: 0, total_duration: 0, cost: 0 };
       byDate[date].calls++;
       if (c.hot_lead) byDate[date].hot_leads++;

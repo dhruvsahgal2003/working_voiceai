@@ -9,7 +9,7 @@ const { requireAuth } = require('../middleware/auth');
 
 router.use(requireAuth);
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
 /**
  * Normalize an Indian phone number to E.164 format (+91XXXXXXXXXX).
@@ -56,7 +56,7 @@ router.get('/', async (req, res) => {
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
     let query = supabase.from('leads')
-      .select('*, call_logs(id, outcome, duration_seconds, created_at, hot_lead, recording_url)', { count: 'exact' })
+      .select('*, agents(id, name), call_logs(id, outcome, duration_seconds, created_at, hot_lead, recording_url)', { count: 'exact' })
       .eq('user_id', req.user.id)
       .order('created_at', { ascending: false })
       .range(offset, offset + parseInt(limit) - 1);
@@ -77,7 +77,7 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const { data, error } = await supabase.from('leads')
-      .select('*, call_logs(*)')
+      .select('*, agents(id, name), call_logs(*)')
       .eq('id', req.params.id).eq('user_id', req.user.id).single();
     if (error || !data) return res.status(404).json({ error: 'Lead not found' });
     res.json(data);
@@ -100,7 +100,7 @@ router.get('/:id/timeline', async (req, res) => {
 // POST /api/leads
 router.post('/', async (req, res) => {
   try {
-    const { name, phone, city, property_type, budget, language, campaign_id, notes, email } = req.body;
+    const { name, phone, city, property_type, budget, language, campaign_id, agent_id, notes, email } = req.body;
     if (!phone) return res.status(400).json({ error: 'Phone is required' });
 
     // Normalize phone to E.164
@@ -113,7 +113,10 @@ router.post('/', async (req, res) => {
       id: uuidv4(),
       user_id: req.user.id,
       name, email, phone: normalizedPhone, city, property_type, budget,
-      language: language || 'en', campaign_id: campaign_id || null, notes,
+      language: language || 'en', campaign_id: campaign_id || null,
+      // Optional: pin this lead to a specific agent up front. NULL just means
+      // "decide at dial time" — see resolveAgentForCall() in routes/calls.js.
+      agent_id: agent_id || null, notes,
       status: 'pending', source: 'manual',
     }).select().single();
     if (error) throw error;
@@ -124,7 +127,13 @@ router.post('/', async (req, res) => {
 });
 
 // POST /api/leads/upload/csv
-router.post('/upload/csv', upload.single('file'), async (req, res) => {
+router.post('/upload/csv', (req, res, next) => {
+  upload.single('file')(req, res, (err) => {
+    if (err?.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ error: 'File too large. Maximum allowed size is 50 MB.' });
+    if (err) return res.status(400).json({ error: err.message });
+    next();
+  });
+}, async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     const { campaign_id } = req.body;
@@ -137,19 +146,48 @@ router.post('/upload/csv', upload.single('file'), async (req, res) => {
     const leads = [];
     const skipped = [];
 
+    const allKeys = records[0] ? Object.keys(records[0]) : [];
+
+    // 1. Try header name match first
+    let phoneKey = allKeys.find(k =>
+      /^(phone|mobile|contact|number|cell|telephone|ph|mob|phone_number|phone number|whatsapp)$/i.test(k.trim())
+      || /phone|mobile|contact/i.test(k)
+    ) || null;
+
+    // 2. If no named match, detect by value — find the column whose values look like phone numbers
+    if (!phoneKey) {
+      const sample = records.slice(0, 10);
+      phoneKey = allKeys.find(k => {
+        const hits = sample.filter(r => /^(\+?91[\s-]?)?[6-9]\d{9}$/.test((r[k] || '').toString().replace(/[\s\-().]/g, '')));
+        return hits.length >= Math.ceil(sample.length * 0.5);
+      }) || null;
+    }
+
+    // 3. Similarly auto-detect name and city columns by value pattern
+    const nameKey = allKeys.find(k => /^(name|customer.*name|client.*name|lead.*name|full.*name|first.*name)$/i.test(k.trim())) ||
+      allKeys.find(k => {
+        if (k === phoneKey) return false;
+        const sample = records.slice(0, 10);
+        const hits = sample.filter(r => /^[A-Za-z\s.]{3,40}$/.test((r[k] || '').toString().trim()));
+        return hits.length >= Math.ceil(sample.length * 0.6);
+      }) || null;
+
+    const cityKey = allKeys.find(k => /^(city|location|area|district|place)$/i.test(k.trim())) || null;
+
     for (const row of records) {
-      const rawPhone = (row.phone || row.Phone || row.mobile || row.Mobile || row.number || row.Phone_Number || row['Phone Number'] || row.contact || row.Contact || '').trim();
-      if (!rawPhone) { skipped.push({ row, reason: 'Missing phone' }); continue; }
-      const normalizedPhone = normalizePhone(rawPhone);
-      if (normalizedPhone.replace(/\D/g, '').length < 7) { skipped.push({ phone: rawPhone, reason: 'Invalid phone number' }); continue; }
-      if (dncPhones.has(normalizedPhone)) { skipped.push({ phone, reason: 'DNC list' }); continue; }
+      const rawPhone = (phoneKey ? row[phoneKey] : '') || '';
+      const trimmedPhone = rawPhone.toString().trim();
+      if (!trimmedPhone) { skipped.push({ reason: 'Missing phone' }); continue; }
+      const normalizedPhone = normalizePhone(trimmedPhone);
+      if (normalizedPhone.replace(/\D/g, '').length < 7) { skipped.push({ phone: trimmedPhone, reason: 'Invalid phone number' }); continue; }
+      if (dncPhones.has(normalizedPhone)) { skipped.push({ phone: normalizedPhone, reason: 'DNC list' }); continue; }
       leads.push({
         id: uuidv4(),
         user_id: req.user.id,
         phone: normalizedPhone,
-        name: row.name || row.Name || row.customer_name || '',
+        name: (nameKey ? row[nameKey] : '') || row.name || row.Name || row.customer_name || '',
         email: row.email || row.Email || '',
-        city: row.city || row.City || row.location || '',
+        city: (cityKey ? row[cityKey] : '') || row.city || row.City || row.location || '',
         property_type: row.property_type || row.intent || row.type || '',
         budget: row.budget || row.Budget || '',
         language: (row.language || row.Language || 'en').toLowerCase(),
@@ -159,7 +197,9 @@ router.post('/upload/csv', upload.single('file'), async (req, res) => {
       });
     }
 
-    if (!leads.length) return res.status(400).json({ error: 'No valid leads found', skipped });
+    if (!leads.length) {
+      return res.status(400).json({ error: 'No valid leads found', skipped, detected_phone_column: phoneKey || null, csv_columns: allKeys });
+    }
 
     const { data, error } = await supabase.from('leads')
       .upsert(leads, { onConflict: 'phone,user_id', ignoreDuplicates: true }).select();
@@ -179,7 +219,7 @@ router.post('/upload/csv', upload.single('file'), async (req, res) => {
 // PATCH /api/leads/:id
 router.patch('/:id', async (req, res) => {
   try {
-    const allowed = ['status', 'notes', 'callback_time', 'name', 'city', 'budget', 'property_type', 'tags', 'score'];
+    const allowed = ['status', 'notes', 'callback_time', 'name', 'city', 'budget', 'property_type', 'tags', 'score', 'agent_id', 'campaign_id'];
     const updates = { updated_at: new Date().toISOString() };
     allowed.forEach(k => { if (req.body[k] !== undefined) updates[k] = req.body[k]; });
     const { data, error } = await supabase.from('leads').update(updates).eq('id', req.params.id).eq('user_id', req.user.id).select().single();

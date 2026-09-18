@@ -19,7 +19,23 @@ router.get('/conversations', async (req, res) => {
       .eq('user_id', req.user.id)
       .order('last_message_at', { ascending: false });
     if (error) throw error;
-    res.json({ conversations: data || [] });
+
+    const conversations = data || [];
+
+    // "Did they reply?" is the whole question for a follow-up inbox, so answer it
+    // on the list rather than making someone open every thread to find out.
+    const ids = conversations.map(c => c.id);
+    let repliedIds = new Set();
+    if (ids.length) {
+      const { data: inbound } = await supabase.from('whatsapp_messages')
+        .select('conversation_id').eq('user_id', req.user.id)
+        .eq('direction', 'inbound').in('conversation_id', ids);
+      repliedIds = new Set((inbound || []).map(m => m.conversation_id));
+    }
+
+    res.json({
+      conversations: conversations.map(c => ({ ...c, has_replied: repliedIds.has(c.id) })),
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -33,10 +49,26 @@ router.get('/conversations/:id/messages', async (req, res) => {
     if (!conv) return res.status(404).json({ error: 'Conversation not found' });
 
     const { data, error } = await supabase.from('whatsapp_messages')
-      .select('*').eq('conversation_id', req.params.id)
+      .select('*, agents(id, name), leads(id, name, phone)')
+      .eq('conversation_id', req.params.id)
       .order('wa_timestamp', { ascending: false }).limit(100);
     if (error) throw error;
-    res.json({ messages: (data || []).reverse() });
+
+    const messages = (data || []).reverse();
+
+    // Attach the outcome of the call each message is tied to, so the thread can
+    // show "sent after a 46s call that ended: interested" rather than a bare
+    // bubble with no explanation of why the lead was messaged at all.
+    const callIds = [...new Set(messages.map(m => m.call_id).filter(Boolean))];
+    let callsById = {};
+    if (callIds.length) {
+      const { data: calls } = await supabase.from('call_logs')
+        .select('id, outcome, duration_seconds, started_at, end_reason, recording_url')
+        .in('id', callIds);
+      callsById = Object.fromEntries((calls || []).map(c => [c.id, c]));
+    }
+
+    res.json({ messages: messages.map(m => ({ ...m, call: callsById[m.call_id] || null })) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

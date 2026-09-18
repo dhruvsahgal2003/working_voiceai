@@ -76,7 +76,7 @@ function LPNav() {
     <nav className="lp-nav">
       <Link to="/" className="lp-nav-logo">
         <div className="lp-nav-logo-icon">C</div>
-        Callora
+        Velryx
       </Link>
       <div className="lp-nav-links">
         <Link to="/">Home</Link>
@@ -194,7 +194,7 @@ export default function Pricing() {
 
       <footer className="lp-footer">
         <div className="lp-footer-bottom" style={{ borderTop: 'none', paddingTop: 0 }}>
-          <span>© 2025 Callora AI. All rights reserved.</span>
+          <span>© 2025 Velryx AI. All rights reserved.</span>
           <div style={{ display: 'flex', gap: 20 }}>
             <Link to="/" style={{ color: 'rgba(255,255,255,0.45)', textDecoration: 'none', fontSize: 13 }}>Home</Link>
             <Link to="/about" style={{ color: 'rgba(255,255,255,0.45)', textDecoration: 'none', fontSize: 13 }}>About</Link>

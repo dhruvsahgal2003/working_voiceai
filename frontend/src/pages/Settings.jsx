@@ -139,13 +139,13 @@ function ConnectPlivoTab() {
         borderRadius: 10, padding: '14px 18px', marginBottom: 24,
       }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: '#4338ca', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-          ⚡ What Callora handles automatically
+          ⚡ What Velryx handles automatically
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 16px' }}>
           {[
             'LiveKit voice infrastructure',
             'SIP trunk configuration',
-            'Sarvam AI (Hindi/English STT+TTS)',
+            'Multilingual voice (Hindi/English)',
             'AI model routing',
             'Call recording & storage',
             'Number sync from Plivo',

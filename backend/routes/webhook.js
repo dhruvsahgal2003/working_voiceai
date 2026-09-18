@@ -10,7 +10,7 @@ const { addCredits } = require('../services/billing');
 const { notifyHotLead, createEvent } = require('../services/notifications');
 const { fireWebhooks } = require('../services/webhookFire');
 const { stopRoomRecording } = require('../services/livekit');
-const { upsertContact, getOrCreateConversation, bumpConversation, insertMessage, updateMessageStatus } = require('../services/whatsapp');
+const { upsertContact, getOrCreateConversation, bumpConversation, insertMessage, updateMessageStatus, mirrorOutboundSend, linkInboundToContext } = require('../services/whatsapp');
 
 // GET /api/webhook/plivo/answer — Plivo calls this when lead picks up
 router.get('/plivo/answer', async (req, res) => {
@@ -130,6 +130,7 @@ router.post('/plivo', async (req, res) => {
       const { data: lead } = await supabase.from('leads').select('*').eq('id', leadId).single();
       const callData = { call_id: cl.id, lead_name: lead?.name, lead_phone: lead?.phone, outcome: resolvedOutcome, duration_seconds: durationSec, recording_url: RecordingUrl || null };
       await fireWebhooks(cl.user_id, 'call.completed', callData);
+      await maybeMirrorWhatsApp(cl.user_id, lead, cl, resolvedOutcome, durationSec);
       if (RecordingUrl) await fireWebhooks(cl.user_id, 'recording.ready', { call_id: cl.id, recording_url: RecordingUrl });
       if (isHot) {
         await notifyHotLead(cl.user_id, lead, { id: cl.id, intent, budget_range, outcome: resolvedOutcome });
@@ -190,7 +191,8 @@ router.post('/agent', async (req, res) => {
   }
 
   try {
-    const { room_name, duration_seconds, transcript, full_text, config, analysis } = req.body;
+    const { room_name, duration_seconds, transcript, full_text, config, analysis,
+            end_reason, transfer_status } = req.body;
     console.log('[Webhook/Agent] Call ended:', { room_name, duration_seconds, turns: transcript?.length ?? 0, outcome: analysis?.outcome });
 
     // Find call log by room name (1) exact match, (2) parse lead_id from room pattern: call-{lead_id}-{ts}
@@ -231,6 +233,14 @@ router.post('/agent', async (req, res) => {
       bhk_preference: analysis?.bhk_preference, location_preference: analysis?.location_preference,
       timeline: analysis?.timeline, callback_time: analysis?.callback_time, analysis: analysis || {},
       ended_at: new Date().toISOString(),
+      // Why the call ended, straight from the agent. Surfaced in the History tab
+      // so "agent hung up because they weren't interested" is distinguishable
+      // from "the line dropped".
+      end_reason: end_reason || cl.end_reason || 'completed',
+      // Only record an offer/decline here. A COMPLETED transfer is written by
+      // /api/internal/transfer-call at the moment it happens — overwriting it
+      // from this late-arriving payload would clobber the authoritative result.
+      ...(transfer_status && !cl.transfer_status ? { transfer_status } : {}),
     }).eq('id', cl.id);
     if (updateErr) console.error('[Webhook/Agent] call_logs update error:', updateErr.message);
 
@@ -264,8 +274,18 @@ router.post('/agent', async (req, res) => {
     // Fire event subscriptions
     if (cl.user_id) {
       const { data: lead } = await supabase.from('leads').select('*').eq('id', cl.lead_id).single();
-      const callData = { call_id: cl.id, lead_name: lead?.name, lead_phone: lead?.phone || cl.to_number, outcome: analysis?.outcome || 'completed', duration_seconds: durationSec };
+      // end_reason/transfer_status are what a downstream automation actually
+      // branches on — "the agent closed by promising WhatsApp details" is a
+      // different trigger from "the line dropped", and both arrive as outcome
+      // 'completed'.
+      const callData = {
+        call_id: cl.id, lead_name: lead?.name, lead_phone: lead?.phone || cl.to_number,
+        outcome: analysis?.outcome || 'completed', duration_seconds: durationSec,
+        end_reason: end_reason || cl.end_reason || 'completed',
+        transfer_status: transfer_status || cl.transfer_status || null,
+      };
       await fireWebhooks(cl.user_id, 'call.completed', callData);
+      await maybeMirrorWhatsApp(cl.user_id, lead, cl, analysis?.outcome || 'completed', durationSec);
       await fireWebhooks(cl.user_id, 'analysis.done', { ...callData, analysis: analysis || {} });
       if (isHot) {
         await notifyHotLead(cl.user_id, lead || { phone: cl.to_number }, cl);
@@ -355,6 +375,32 @@ router.post('/paygic', async (req, res) => {
   }
 });
 
+// ─── WHATSAPP CLOUD API — WEBHOOK VERIFICATION ────────────────────────────────
+// Meta verifies a callback URL with a GET carrying hub.verify_token and expects
+// hub.challenge echoed back as plain text. The n8n inbound flow proxies that GET
+// here rather than checking the token itself, so WHATSAPP_VERIFY_TOKEN stays in
+// the backend env and is never stored in a workflow definition.
+//
+// No internal secret required: knowing the verify token IS the authentication,
+// and Meta will not send one.
+router.get('/whatsapp/verify', (req, res) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  const expected = process.env.WHATSAPP_VERIFY_TOKEN;
+
+  if (!expected) {
+    console.error('[WhatsApp/verify] WHATSAPP_VERIFY_TOKEN not configured');
+    return res.status(500).send('verify token not configured');
+  }
+  if (mode === 'subscribe' && token === expected) {
+    console.log('[WhatsApp/verify] challenge accepted');
+    return res.type('text/plain').send(String(challenge ?? ''));
+  }
+  console.warn('[WhatsApp/verify] rejected — mode=%s token match=%s', mode, token === expected);
+  return res.sendStatus(403);
+});
+
 // ─── WHATSAPP CLOUD API — INBOUND MESSAGES ─────────────────────────────────────
 // Called by the n8n receive flow (not directly by Meta) with the raw Meta webhook
 // body forwarded as-is. Single-client MVP: WHATSAPP_USER_ID identifies which
@@ -384,10 +430,14 @@ router.post('/whatsapp/inbound', async (req, res) => {
           const body = msg.text?.body || msg.button?.text || `[${msg.type}]`;
           const waTimestamp = msg.timestamp ? new Date(parseInt(msg.timestamp, 10) * 1000).toISOString() : new Date().toISOString();
 
+          // Inherit the call/lead/agent from the outbound message this replies to,
+          // so a reply is traceable back to the call that prompted it.
+          const replyCtx = await linkInboundToContext(conversation.id);
+
           const saved = await insertMessage({
             conversationId: conversation.id, userId, direction: 'inbound',
             wamid: msg.id, body, messageType: msg.type || 'text', status: 'received',
-            rawPayload: msg, waTimestamp,
+            rawPayload: msg, waTimestamp, ...replyCtx,
           });
           if (saved) await bumpConversation(conversation.id, { preview: body.slice(0, 120), at: waTimestamp, incrementUnread: true });
         }
@@ -434,22 +484,47 @@ router.post('/whatsapp/outbound-log', async (req, res) => {
   if (!userId) return res.status(500).json({ error: 'WHATSAPP_USER_ID not configured' });
 
   try {
-    const { to, template_name, wamid, lead_name } = req.body || {};
-    if (!to || !wamid) return res.status(400).json({ error: 'to and wamid required' });
+    const { to, template_name, wamid, lead_name, text, call_id } = req.body || {};
+    // wamid is optional: if the send succeeded but n8n couldn't parse an id back out
+    // of the Graph response, we still want the recipient to appear in the inbox.
+    // Without this the contact is invisible in Messages even though we messaged them.
+    if (!to) return res.status(400).json({ error: 'to required' });
+
+    // call_id is what makes "who did the agent message, and about which call?"
+    // answerable. n8n has been sending it all along; this handler used to discard
+    // it, which is why every thread was context-free.
+    let ctx = {};
+    if (call_id) {
+      const { data: cl } = await supabase.from('call_logs')
+        .select('id, lead_id, agent_id').eq('id', call_id).maybeSingle();
+      if (cl) ctx = { callId: cl.id, leadId: cl.lead_id, agentId: cl.agent_id };
+      else console.warn(`[WhatsApp/outbound-log] unknown call_id ${call_id} — logging without context`);
+    }
 
     const contact = await upsertContact(userId, to, lead_name);
     const conversation = await getOrCreateConversation(userId, contact.id);
-    const preview = `Template: ${template_name || 'unknown'}`;
+    // Keep the contact pointed at the lead we called, so the inbox row can show
+    // which lead a thread belongs to.
+    if (ctx.leadId && !contact.lead_id) {
+      await supabase.from('whatsapp_contacts').update({ lead_id: ctx.leadId }).eq('id', contact.id);
+    }
+    // Prefer the real message text so the thread shows what the lead actually got;
+    // fall back to the template name when only that is available.
+    const body = (text || '').trim() || `Template: ${template_name || 'unknown'}`;
+    const preview = body.slice(0, 120);
     const now = new Date().toISOString();
 
     const saved = await insertMessage({
       conversationId: conversation.id, userId, direction: 'outbound',
-      wamid, body: preview, messageType: 'template', status: 'sent',
+      wamid, body, messageType: text ? 'text' : 'template', status: 'sent',
       rawPayload: req.body, waTimestamp: now,
+      templateName: template_name || null, ...ctx,
     });
+    // saved === null means a duplicate wamid (Meta/n8n retry) — the conversation was
+    // already bumped by the original delivery, so don't bump it again.
     if (saved) await bumpConversation(conversation.id, { preview, at: now, incrementUnread: false });
 
-    res.json({ success: true });
+    res.json({ success: true, conversation_id: conversation.id, contact_id: contact.id });
   } catch (e) {
     console.error('[WhatsApp/outbound-log] error:', e.message);
     res.status(500).json({ error: e.message });
@@ -457,6 +532,32 @@ router.post('/whatsapp/outbound-log', async (req, res) => {
 });
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
+
+// Outcomes where nobody actually picked up, so no follow-up template is sent and
+// nothing should appear in the inbox.
+const NO_CONTACT_OUTCOMES = new Set(['no_answer', 'voicemail', 'wrong_number', 'failed', 'busy', 'dnc_requested']);
+
+// Mirror the post-call WhatsApp follow-up into the inbox. See mirrorOutboundSend
+// in services/whatsapp.js for why this is written locally rather than logged by
+// the sender. Best-effort: a failure here must never break call completion.
+async function maybeMirrorWhatsApp(userId, lead, callLog, outcome, durationSec) {
+  if (process.env.WHATSAPP_MIRROR_SENDS === 'false') return;
+  if (!userId || !process.env.WHATSAPP_USER_ID) return;
+  if (NO_CONTACT_OUTCOMES.has(outcome) || !durationSec) return;
+
+  const phone = lead?.phone || callLog?.to_number;
+  if (!phone) return;
+
+  try {
+    await mirrorOutboundSend(userId, {
+      phone, name: lead?.name, callId: callLog?.id,
+      leadId: lead?.id || callLog?.lead_id || null, agentId: callLog?.agent_id || null,
+    });
+  } catch (e) {
+    console.error('[WhatsApp/mirror] error:', e.message);
+  }
+}
+
 function mapCallStatus(s) {
   return { completed: 'completed', 'no-answer': 'no_answer', busy: 'busy', failed: 'failed', canceled: 'failed' }[s] || 'unknown';
 }

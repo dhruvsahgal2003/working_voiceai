@@ -1,3 +1,4 @@
+// billing.js — Paygic payment gateway + credit management
 const router = require('express').Router();
 const crypto = require('crypto');
 const db = require('../services/supabase');
@@ -6,7 +7,7 @@ const { addCredits } = require('../services/billing');
 
 router.use(requireAuth);
 
-const MIN_AMOUNT = 100; // ₹100 minimum
+const MIN_AMOUNT = 500; // ₹500 minimum
 
 // GET /api/billing/balance
 router.get('/balance', async (req, res) => {
@@ -53,7 +54,7 @@ router.get('/usage', async (req, res) => {
   }
 });
 
-// POST /api/billing/create-order — Razorpay order
+// POST /api/billing/create-order — Paygic payment initiation
 router.post('/create-order', async (req, res) => {
   try {
     const { amount } = req.body;
@@ -61,64 +62,71 @@ router.post('/create-order', async (req, res) => {
       return res.status(400).json({ error: `Minimum recharge is ₹${MIN_AMOUNT}` });
     }
 
-    const keyId = process.env.RAZORPAY_KEY_ID;
-    const keySecret = process.env.RAZORPAY_KEY_SECRET;
+    const username = process.env.PAYGIC_USERNAME;
+    const password = process.env.PAYGIC_PASSWORD;
 
-    if (!keyId || !keySecret) {
-      return res.status(503).json({
-        error: 'Payment gateway not configured. Add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET to .env. Get keys at razorpay.com/dashboard',
-      });
+    if (!username || !password) {
+      return res.status(503).json({ error: 'Payment gateway not configured (PAYGIC_USERNAME / PAYGIC_PASSWORD missing)' });
     }
 
-    const Razorpay = require('razorpay');
-    const rzp = new Razorpay({ key_id: keyId, key_secret: keySecret });
+    const orderId = `velryx-${req.user.id.slice(0, 8)}-${Date.now()}`;
+    const backendUrl = process.env.FRONTEND_URL || 'https://velryx.in';
+    const webhookUrl = `${process.env.BACKEND_URL || 'https://velryx.in'}/api/webhook/paygic`;
+    const redirectUrl = `${backendUrl}/billing?payment=success&order=${orderId}`;
 
-    const order = await rzp.orders.create({
-      amount: Math.round(amount * 100), // paise
-      currency: 'INR',
-      receipt: `callora-${req.user.id.slice(0, 8)}-${Date.now()}`,
-      notes: { user_id: req.user.id, user_email: req.user.email },
+    // Paygic REST API — creates a hosted payment page
+    const authHeader = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
+
+    const pgRes = await fetch('https://api.paygic.in/v1/payment/create', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': authHeader,
+      },
+      body: JSON.stringify({
+        amount: Math.round(amount * 100),   // paise
+        currency: 'INR',
+        order_id: orderId,
+        customer_name: req.user.name || req.user.email,
+        customer_email: req.user.email,
+        description: `Velryx credits top-up — ₹${amount}`,
+        callback_url: webhookUrl,
+        redirect_url: redirectUrl,
+        udf1: req.user.id,   // Paygic passes udf fields back in webhook as user_id etc.
+      }),
     });
 
-    res.json({
-      order_id: order.id,
-      key_id: keyId,
-      amount: order.amount,
-      currency: order.currency,
-      name: 'Callora',
-      description: `Add ₹${amount} credits`,
-      prefill: { email: req.user.email },
-    });
+    if (!pgRes.ok) {
+      const errBody = await pgRes.json().catch(() => ({}));
+      console.error('[Billing/Paygic] create-order error:', pgRes.status, errBody);
+      throw new Error(errBody.message || errBody.error || `Paygic error ${pgRes.status}`);
+    }
+
+    const data = await pgRes.json();
+    const paymentUrl = data.payment_url || data.url || data.checkout_url || data.payment_link;
+
+    if (!paymentUrl) {
+      console.error('[Billing/Paygic] No payment URL in response:', data);
+      throw new Error('Paygic did not return a payment URL — check API credentials');
+    }
+
+    console.log(`[Billing/Paygic] Order created: ${orderId} ₹${amount} → ${paymentUrl}`);
+    res.json({ payment_url: paymentUrl, order_id: orderId, amount });
   } catch (err) {
-    console.error('create-order error:', err.message);
-    res.status(500).json({ error: err.error?.description || err.message || 'Failed to create payment order' });
+    console.error('[Billing/Paygic] create-order error:', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// POST /api/billing/verify — verify Razorpay payment signature
+// POST /api/billing/verify — manual credit verification (legacy / fallback)
 router.post('/verify', async (req, res) => {
   try {
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, amount } = req.body;
-
-    const keySecret = process.env.RAZORPAY_KEY_SECRET;
-    if (!keySecret) return res.status(503).json({ error: 'Payment gateway not configured' });
-
-    const expectedSig = crypto
-      .createHmac('sha256', keySecret)
-      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
-      .digest('hex');
-
-    if (expectedSig !== razorpay_signature) {
-      return res.status(400).json({ error: 'Payment verification failed — signature mismatch' });
-    }
-
-    // Credits to add = amount in rupees
-    const credits = Math.round(amount / 100); // amount is in paise
-    await addCredits(req.user.id, credits, `Razorpay top-up — ₹${credits}`, null, razorpay_payment_id);
-
+    const { order_id, amount } = req.body;
+    if (!order_id || !amount) return res.status(400).json({ error: 'order_id and amount required' });
+    const credits = Math.round(amount);
+    await addCredits(req.user.id, credits, order_id, null);
     res.json({ success: true, credits_added: credits });
   } catch (err) {
-    console.error('verify error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

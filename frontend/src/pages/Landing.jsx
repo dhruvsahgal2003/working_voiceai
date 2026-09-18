@@ -1,212 +1,193 @@
+// Landing.jsx — Velryx marketing homepage
+// Big black type · cream substrate · pastel section panels · warm glass cards
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { motion, useInView } from 'framer-motion';
-import gsap from 'gsap';
-import { ScrollTrigger } from 'gsap/ScrollTrigger';
+import { Phone, BarChart2, Zap, Shield, Globe, Book, Check, ArrowRight, Play } from 'lucide-react';
 
-gsap.registerPlugin(ScrollTrigger);
+/* ── Scroll progress bar ─────────────────────────────────────────────── */
+function useScrollProgress() {
+  const [p, setP] = useState(0);
+  useEffect(() => {
+    const onScroll = () => {
+      const max = (document.documentElement.scrollHeight - window.innerHeight) || 1;
+      setP(Math.max(0, Math.min(1, window.scrollY / max)));
+    };
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+  return p;
+}
 
-/* ─── USE CASES (ringg.ai style: industry + specific call count) ─────────── */
-const USE_CASES = [
-  {
-    label: 'Lead Qualification',
-    description: 'Instantly call every new inquiry. Qualify intent, budget and timeline before your team picks up the phone.',
-    stat: '1.2M+',
-    statLabel: 'leads qualified',
-    icon: IconTarget,
-    color: '#eef2ff',
-    iconColor: '#4f46e5',
-  },
-  {
-    label: 'Site Visit Booking',
-    description: 'Confirm visits, send reminders, handle reschedules. Zero manual effort, dramatically higher show-up rates.',
-    stat: '380K+',
-    statLabel: 'visits booked',
-    icon: IconCalendar,
-    color: '#f0fdf4',
-    iconColor: '#16a34a',
-  },
-  {
-    label: 'Resale Follow-up',
-    description: 'Re-engage cold leads at scale. The AI remembers context and picks up conversations naturally.',
-    stat: '520K+',
-    statLabel: 'follow-ups completed',
-    icon: IconRefresh,
-    color: '#fffbeb',
-    iconColor: '#d97706',
-  },
-  {
-    label: 'NRI Inquiries',
-    description: 'Handle calls across time zones in English, Hindi and regional languages. Available around the clock.',
-    stat: '24/7',
-    statLabel: 'availability',
-    icon: IconGlobe,
-    color: '#fff1f2',
-    iconColor: '#e11d48',
-  },
-  {
-    label: 'Payment Reminders',
-    description: 'Automate installment reminders, due date follow-ups and overdue alerts with a polite, persistent voice.',
-    stat: '94%',
-    statLabel: 'contact rate',
-    icon: IconBell,
-    color: '#f5f3ff',
-    iconColor: '#7c3aed',
-  },
-  {
-    label: 'Post-Sale Engagement',
-    description: 'Welcome new buyers, collect satisfaction feedback and nurture referrals — all on autopilot.',
-    stat: '4.8★',
-    statLabel: 'avg. CSAT score',
-    icon: IconStar,
-    color: '#ecfdf5',
-    iconColor: '#059669',
-  },
-];
-
-const STATS = [
-  { value: '10,000+', label: 'Concurrent calls' },
-  { value: '800ms',   label: 'Avg response time' },
-  { value: '20+',     label: 'Indian languages' },
-  { value: '99.9%',   label: 'Uptime SLA' },
-];
-
-const HOW_IT_WORKS = [
-  { n: '01', title: 'Describe your agent', body: 'Enter your brand and use case. AI writes the full conversation script — opening, objection handling, FAQs — in 30 seconds.' },
-  { n: '02', title: 'Import your leads', body: 'Upload any CSV. Numbers are auto-formatted, duplicates removed, DNC list checked. Campaign ready in minutes.' },
-  { n: '03', title: 'Launch your campaign', body: 'Set calling hours (e.g. 10am–7pm IST), concurrency limit and hit launch. The platform handles everything.' },
-  { n: '04', title: 'Close hot leads', body: 'Get instant alerts on interested leads with full transcripts. Your team only talks to people who want to hear from you.' },
-];
-
-const TESTIMONIALS = [
-  { quote: 'We went from 80 calls a day to 800. Site visit bookings tripled in the first month. The Hindi voice is indistinguishable from a real person.', name: 'Nikhil Mehta', role: 'Sales Head, Mumbai Developer', avatar: 'NM' },
-  { quote: 'NRI leads were impossible — different time zones, no one to answer at 2am. Now the AI handles them 24/7. Conversion rate up 40%.', name: 'Deepika Rao', role: 'GM Marketing, Bangalore Realty', avatar: 'DR' },
-  { quote: "Setup took 20 minutes. First campaign live the same day. I've closed 3 deals from hot-lead alerts already.", name: 'Arjun Sharma', role: 'Founder, PropTech Startup', avatar: 'AS' },
-];
-
-/* ─── ANIMATION HELPERS ───────────────────────────────────────────────────── */
-const fadeUp = {
-  hidden:  { opacity: 0, y: 24 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.16, 1, 0.3, 1] } },
-};
-
-function Reveal({ children, delay = 0, style }) {
-  const ref = useRef(null);
-  const inView = useInView(ref, { once: true, margin: '-60px' });
+function ScrollProgressBar() {
+  const p = useScrollProgress();
   return (
-    <motion.div ref={ref} initial="hidden" animate={inView ? 'visible' : 'hidden'}
-      variants={{ hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.5, delay, ease: [0.16, 1, 0.3, 1] } } }}
-      style={style}>
-      {children}
-    </motion.div>
+    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, height: 3, zIndex: 200, pointerEvents: 'none' }}>
+      <div style={{ height: '100%', width: `${p * 100}%`, background: 'var(--red-500)', transition: 'width 100ms linear' }} />
+    </div>
   );
 }
 
-/* ─── SVG ICONS (no emoji) ────────────────────────────────────────────────── */
-function IconTarget({ size = 20, color = 'currentColor' }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>;
-}
-function IconCalendar({ size = 20, color = 'currentColor' }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>;
-}
-function IconRefresh({ size = 20, color = 'currentColor' }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>;
-}
-function IconGlobe({ size = 20, color = 'currentColor' }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>;
-}
-function IconBell({ size = 20, color = 'currentColor' }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>;
-}
-function IconStar({ size = 20, color = 'currentColor' }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>;
-}
-function IconPhone({ size = 20, color = 'currentColor' }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13.4a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.62 2.72h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.91 10a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>;
-}
-function IconZap({ size = 20, color = 'currentColor' }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>;
-}
-function IconBarChart({ size = 20, color = 'currentColor' }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>;
-}
-function IconBook({ size = 20, color = 'currentColor' }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>;
-}
-function IconWebhook({ size = 20, color = 'currentColor' }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 16.98h-5.99c-1.1 0-1.95.94-2.48 1.9A4 4 0 0 1 2 17c.01-.7.2-1.4.57-2"/><path d="m6 17 3.13-5.78c.53-.97.1-2.18-.5-3.1a4 4 0 1 1 6.89-4.06"/><path d="m12 6 3.13 5.73C15.66 12.7 16.9 13 18 13a4 4 0 0 1 0 8"/></svg>;
-}
-
-/* ─── PRODUCT MOCKUP SVG ──────────────────────────────────────────────────── */
-function ProductMockup() {
+/* ── Navbar ──────────────────────────────────────────────────────────── */
+function NavBar() {
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const fn = () => setScrolled(window.scrollY > 20);
+    window.addEventListener('scroll', fn, { passive: true });
+    return () => window.removeEventListener('scroll', fn);
+  }, []);
   return (
-    <div style={{ position: 'relative', borderRadius: 16, overflow: 'hidden', boxShadow: '0 24px 80px rgba(0,0,0,0.18), 0 8px 24px rgba(0,0,0,0.1)', border: '1px solid #e2e8f0' }}>
-      {/* Browser chrome */}
-      <div style={{ background: '#1e1b4b', padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 6 }}>
-        <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#ff5f57' }} />
-        <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#febc2e' }} />
-        <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#28c840' }} />
-        <div style={{ flex: 1, background: 'rgba(255,255,255,0.08)', borderRadius: 4, height: 22, marginLeft: 8, display: 'flex', alignItems: 'center', paddingLeft: 10 }}>
-          <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', fontFamily: 'monospace' }}>app.callora.in/campaigns</span>
+    <nav style={{ position: 'sticky', top: 0, zIndex: 50, padding: '14px 5%' }}>
+      <div style={{
+        maxWidth: 1180, margin: '0 auto',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '10px 20px', borderRadius: 9999,
+        background: scrolled ? 'rgba(255,253,247,0.92)' : 'rgba(255,253,247,0.70)',
+        border: '1px solid rgba(20,20,40,0.08)',
+        backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+        transition: 'background 0.2s',
+        boxShadow: scrolled ? '0 4px 20px rgba(20,20,40,0.07)' : 'none',
+      }}>
+        <Link to="/" style={{ display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none' }}>
+          <div style={{ width: 28, height: 28, borderRadius: 7, background: 'var(--grad-brand)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 13, color: '#fff' }}>V</div>
+          <span style={{ font: "700 16px/1 'Inter Tight'", letterSpacing: '-0.02em', color: '#0B0B14' }}>Velryx</span>
+        </Link>
+        <div className="vx-lp-navlinks" style={{ display: 'flex', gap: 4 }}>
+          {['Product', 'Pricing', 'Industries', 'Docs'].map(l => (
+            <a key={l} style={{ padding: '7px 14px', font: "500 13.5px/1 'Inter'", color: '#2B2B36', textDecoration: 'none', borderRadius: 8, cursor: 'pointer' }}>{l}</a>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <Link to="/login" className="vx-lp-signin" style={{ padding: '8px 16px', font: "500 13.5px/1 'Inter'", color: '#2B2B36', textDecoration: 'none' }}>Sign in</Link>
+          <Link to="/register" style={{ padding: '10px 20px', font: "600 13.5px/1 'Inter'", color: '#fff', background: '#0B0B14', borderRadius: 9999, textDecoration: 'none' }}>
+            Get started
+          </Link>
         </div>
       </div>
+    </nav>
+  );
+}
 
-      {/* App UI */}
-      <div style={{ background: '#0f172a', padding: '20px 20px 0' }}>
-        {/* Top bar */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: '#f8fafc' }}>Campaigns</div>
-            <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>3 active campaigns</div>
+/* ── Hero ────────────────────────────────────────────────────────────── */
+function Hero() {
+  return (
+    <section style={{ position: 'relative', padding: '60px 5% 80px', background: 'var(--cream-100)', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: 'radial-gradient(ellipse 70% 40% at 25% 0%, rgba(230,57,70,0.05) 0%, transparent 60%), radial-gradient(ellipse 60% 35% at 85% 30%, rgba(244,178,51,0.07) 0%, transparent 60%)' }} />
+      <div className="vx-lp-hero" style={{ maxWidth: 1180, margin: '0 auto', display: 'grid', gridTemplateColumns: '1.1fr 1fr', gap: 56, alignItems: 'center' }}>
+        <div>
+          <span className="vx-stamp-tilt" style={{ color: 'var(--red-700)', marginBottom: 28, display: 'inline-flex' }}>
+            Built in India · TRAI compliant
+          </span>
+          <h1 style={{ font: "800 clamp(38px,5.5vw,68px)/1.02 'Inter Tight'", letterSpacing: '-0.035em', color: '#0B0B14', margin: '16px 0 22px', maxWidth: 680 }}>
+            The voice agent platform for{' '}
+            <span style={{ background: 'linear-gradient(180deg, transparent 60%, #F5DE7E 60%, #F5DE7E 96%, transparent 96%)', padding: '0 6px' }}>
+              real estate
+            </span>{' '}
+            in India.
+          </h1>
+          <p style={{ font: "500 17px/1.6 'Inter'", color: '#2B2B36', maxWidth: 520, marginBottom: 36, letterSpacing: '-0.005em' }}>
+            Velryx calls every new inquiry in under 60 seconds — qualifying intent, budget and timeline in Hindi, English, and 20+ Indian languages.
+          </p>
+
+          {/* Phone demo widget */}
+          <div style={{ marginBottom: 36 }}>
+            <div style={{ font: "500 13px/1 'Inter'", color: '#52525F', marginBottom: 10 }}>Experience the agent →</div>
+            <form className="vx-phone-input" onSubmit={e => e.preventDefault()}>
+              <div className="vx-flag" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 14px', borderRight: '1px solid rgba(20,20,40,0.08)', font: "500 13px/1 'Inter'", color: 'var(--ink-700)' }}>
+                <svg width="22" height="14" viewBox="0 0 22 14" style={{ borderRadius: 2 }}>
+                  <rect width="22" height="4.67" y="0" fill="#FF9933" />
+                  <rect width="22" height="4.67" y="4.67" fill="#fff" />
+                  <rect width="22" height="4.67" y="9.34" fill="#138808" />
+                  <circle cx="11" cy="7" r="1.4" fill="none" stroke="#000088" strokeWidth="0.4" />
+                </svg>
+                <span>+91</span>
+              </div>
+              <input type="tel" placeholder="Enter your number" />
+              <button type="submit"><Phone size={13} /> Try Velryx</button>
+            </form>
+            <div className="marginalia" style={{ marginTop: 10, marginLeft: 16, fontSize: 13 }}>
+              We call you back in under 60 seconds. No credit card.
+            </div>
           </div>
-          <div style={{ background: '#4f46e5', color: 'white', fontSize: 11, fontWeight: 600, padding: '6px 14px', borderRadius: 8 }}>+ New Campaign</div>
+
+          <div style={{ display: 'flex', gap: 36, paddingTop: 24, borderTop: '1px solid rgba(20,20,40,0.10)' }}>
+            {[['10K+', 'Concurrent calls', <Phone size={16} />], ['99.9%', 'Uptime', <Shield size={16} />], ['20+', 'Languages', <Globe size={16} />]].map(([v, l, icon]) => (
+              <div key={l} style={{ display: 'flex', gap: 12, alignItems: 'flex-end' }}>
+                <div style={{ color: 'var(--red-600)' }}>{icon}</div>
+                <div>
+                  <div style={{ fontFamily: "'Instrument Serif',serif", fontSize: 32, lineHeight: 0.9, color: '#0B0B14' }}>{v}</div>
+                  <div style={{ font: "italic 400 12px/1.2 'Instrument Serif',serif", color: '#52525F', marginTop: 4 }}>{l}</div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
 
-        {/* Campaign rows */}
-        {[
-          { name: 'Gurgaon Sector 65 Launch', status: 'Running', color: '#22c55e', bg: '#052e16', leads: 847, hot: 62, pct: 68 },
-          { name: 'Mumbai NRI Follow-up Q4', status: 'Running', color: '#22c55e', bg: '#052e16', leads: 512, hot: 41, pct: 44 },
-          { name: 'Delhi Resale Oct Batch', status: 'Paused', color: '#f59e0b', bg: '#451a03', leads: 1200, hot: 88, pct: 81 },
-        ].map((c, i) => (
-          <div key={i} style={{ background: '#1e293b', borderRadius: 10, padding: '12px 14px', marginBottom: 10 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: '#f1f5f9' }}>{c.name}</div>
-                <div style={{ display: 'flex', gap: 12, marginTop: 3 }}>
-                  <span style={{ fontSize: 10, color: '#94a3b8' }}>{c.leads} leads</span>
-                  <span style={{ fontSize: 10, color: '#22c55e', fontWeight: 600 }}>{c.hot} hot</span>
-                </div>
-              </div>
-              <div style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 100, background: c.bg, color: c.color }}>{c.status}</div>
-            </div>
-            <div style={{ height: 3, background: '#334155', borderRadius: 2, overflow: 'hidden' }}>
-              <div style={{ height: '100%', width: `${c.pct}%`, background: 'linear-gradient(90deg, #4f46e5, #818cf8)', borderRadius: 2 }} />
-            </div>
-            <div style={{ fontSize: 9, color: '#475569', marginTop: 4 }}>{c.pct}% complete</div>
-          </div>
-        ))}
-
-        {/* Live call feed */}
-        <div style={{ borderTop: '1px solid #1e293b', padding: '14px 0 16px' }}>
-          <div style={{ fontSize: 10, fontWeight: 600, color: '#475569', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 0 2px rgba(34,197,94,0.25)' }} />
-            LIVE CALLS
-          </div>
-          {[
-            { name: 'Ravi K.', city: 'Gurgaon', outcome: 'Hot lead', oc: '#22c55e' },
-            { name: 'Priya S.', city: 'Mumbai', outcome: 'Calling…', oc: '#f59e0b' },
-            { name: 'Anil M.', city: 'Delhi', outcome: 'Voicemail', oc: '#64748b' },
-          ].map((row, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+        {/* Right: glass mini-app card */}
+        <div className="vx-lp-hero-visual" style={{ position: 'relative', height: 440 }}>
+          <div className="card-glass-warm" style={{ position: 'absolute', right: 0, top: 0, width: 400, borderRadius: 22, overflow: 'hidden', transform: 'rotate(0.5deg)', boxShadow: 'var(--shadow-lg), var(--shadow-inner)' }}>
+            <span className="vx-corner vx-corner-tl" style={{ color: 'rgba(230,57,70,0.5)' }} />
+            <span className="vx-corner vx-corner-br" style={{ color: 'rgba(230,57,70,0.5)' }} />
+            <div style={{ padding: '12px 16px', background: 'rgba(255,253,247,0.7)', borderBottom: '1px solid rgba(20,20,40,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div style={{ width: 24, height: 24, borderRadius: '50%', background: '#334155', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700, color: '#94a3b8' }}>{row.name[0]}</div>
-                <div>
-                  <div style={{ fontSize: 11, color: '#f1f5f9', fontWeight: 500 }}>{row.name}</div>
-                  <div style={{ fontSize: 9, color: '#475569' }}>{row.city}</div>
-                </div>
+                <div style={{ width: 18, height: 18, borderRadius: 4, background: 'var(--grad-brand)' }} />
+                <span style={{ font: "700 12px/1 'Inter Tight'", letterSpacing: '-0.01em' }}>Live · Mumbai NRI Q4</span>
               </div>
-              <div style={{ fontSize: 10, color: row.oc, fontWeight: 600 }}>{row.outcome}</div>
+              <span className="badge badge-live" style={{ fontSize: 10 }}>4 calls</span>
             </div>
+            <div style={{ padding: 16 }}>
+              {[
+                { who: 'V', text: 'Namaste Sneha ji — 2BHK Bangalore ke baare mein baat karte hain?', right: false },
+                { who: 'S', text: 'Haan bolo, kya offer hai?', right: true },
+                { who: 'V', text: 'Marathahalli area mein ₹90L. Saturday 11am site visit book kar dun?', right: false },
+                { who: 'S', text: 'Perfect, kar do.', right: true, hot: true },
+              ].map((b, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: b.right ? 'flex-end' : 'flex-start', gap: 8, marginBottom: 8 }}>
+                  {!b.right && <div style={{ width: 24, height: 24, borderRadius: 6, background: 'var(--red-500)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', font: '700 10px/1 Inter', flexShrink: 0 }}>{b.who}</div>}
+                  <div style={{ maxWidth: '78%', padding: '7px 11px', borderRadius: 10, background: b.right ? '#0B0B14' : 'rgba(255,255,255,0.88)', color: b.right ? '#fff' : '#0B0B14', border: b.right ? 'none' : '1px solid rgba(20,20,40,0.06)', font: '500 11.5px/1.45 Inter', position: 'relative' }}>
+                    {b.text}
+                    {b.hot && <span style={{ position: 'absolute', top: -8, right: -8, font: "700 9px/1 'JetBrains Mono'", letterSpacing: '0.12em', background: 'var(--red-500)', color: '#fff', padding: '3px 6px', borderRadius: 4 }}>HOT</span>}
+                  </div>
+                  {b.right && <div style={{ width: 24, height: 24, borderRadius: 6, background: '#F4B233', color: '#1F1606', display: 'flex', alignItems: 'center', justifyContent: 'center', font: '700 10px/1 Inter', flexShrink: 0 }}>{b.who}</div>}
+                </div>
+              ))}
+            </div>
+            <div style={{ padding: '12px 16px', borderTop: '1px solid rgba(20,20,40,0.06)', background: 'rgba(245,222,126,0.25)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ font: "700 20px/1 'Inter Tight'", letterSpacing: '-0.02em' }}>+42 hot leads</div>
+                <div style={{ font: '500 11px/1 Inter', color: '#52525F', marginTop: 3 }}>vs yesterday · ▲ 18%</div>
+              </div>
+              <span className="vx-stamp" style={{ color: '#9D1924', background: 'rgba(255,255,255,0.6)' }}>TODAY</span>
+            </div>
+          </div>
+
+          {/* Floating chip */}
+          <div style={{ position: 'absolute', left: -8, top: 40, width: 180, padding: '10px 12px', borderRadius: 14, background: 'rgba(255,255,255,0.95)', border: '1px solid rgba(20,20,40,0.08)', boxShadow: '0 14px 32px rgba(20,20,40,0.10)', transform: 'rotate(-3deg)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ width: 28, height: 28, borderRadius: 8, background: 'var(--red-500)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <span style={{ color: '#fff', fontSize: 14 }}>🔥</span>
+              </div>
+              <div>
+                <div style={{ font: '700 11px/1.1 Inter', color: '#0B0B14' }}>Hot · Rohan V.</div>
+                <div style={{ font: '500 10px/1 Inter', color: '#52525F', marginTop: 3 }}>Gurgaon · ₹1.5Cr</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ── Trust bar ───────────────────────────────────────────────────────── */
+function TrustBar() {
+  return (
+    <div style={{ borderTop: '1px solid rgba(20,20,40,0.06)', borderBottom: '1px solid rgba(20,20,40,0.06)', padding: '28px 5%', background: 'var(--cream-100)' }}>
+      <div style={{ maxWidth: 1180, margin: '0 auto', textAlign: 'center' }}>
+        <div className="t-eyebrow" style={{ color: '#52525F', marginBottom: 16 }}>Trusted by India's fastest teams</div>
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap', gap: '24px 48px' }}>
+          {['DCB BANK', 'Flipkart', 'Groww', 'PharmEasy', 'PropTech', 'eKart', 'Growth School'].map(name => (
+            <div key={name} style={{ font: "800 17px/1 'Inter Tight'", letterSpacing: '-0.04em', color: 'rgba(20,20,40,0.45)' }}>{name}</div>
           ))}
         </div>
       </div>
@@ -214,282 +195,291 @@ function ProductMockup() {
   );
 }
 
-/* ─── MAIN COMPONENT ──────────────────────────────────────────────────────── */
-export default function Landing() {
+/* ── Use Cases ───────────────────────────────────────────────────────── */
+const USE_CASES = [
+  { panel: 'terracotta', title: 'Sales',          body: 'Convert leads with intelligent outreach and screen interest before your closers spend a minute.', stat: '500K+', statLabel: 'Calls completed' },
+  { panel: 'marigold',   title: 'Collection',     body: 'Re-engage overdue accounts and screen payment capabilities. Automate follow-ups for better recovery.', stat: '12',    statLabel: 'Active campaigns' },
+  { panel: 'sage',       title: 'Site Visit Booking', body: 'Real-estate-specific: confirm visits, send reminders, handle reschedules. Higher show-up rates.', stat: '380K+', statLabel: 'Visits booked' },
+  { panel: 'mist',       title: 'Appointment Booking', body: 'Identify patient needs and screen preferences. Automate scheduling to increase conversions.', stat: '180K+', statLabel: 'Bookings processed' },
+  { panel: 'clay',       title: 'Last Mile Delivery', body: 'Identify delivery windows and screen recipient availability. Automate coordination for success.', stat: '200K+', statLabel: 'Calls handled' },
+  { panel: 'sand',       title: 'NRI & 24/7',     body: 'Handle calls across time zones in English, Hindi and regional languages. Never miss a NRI inquiry.', stat: '24/7',  statLabel: 'Availability' },
+];
+
+function UseCasesPanel() {
   return (
-    <div style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", background: '#ffffff', color: '#0f172a', minHeight: '100vh', overflowX: 'hidden' }}>
-
-      {/* ── NAV ────────────────────────────────────────────────────────────── */}
-      <nav style={{ position: 'sticky', top: 0, zIndex: 100, borderBottom: '1px solid #f1f5f9', background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
-        <div style={{ maxWidth: 1200, margin: '0 auto', padding: '0 24px', height: 60, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 40 }}>
-            <Link to="/" style={{ display: 'flex', alignItems: 'center', gap: 9, textDecoration: 'none' }}>
-              <div style={{ width: 30, height: 30, background: '#4f46e5', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13.4a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.62 2.72h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.91 10a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-              </div>
-              <span style={{ fontWeight: 700, fontSize: 16, color: '#0f172a', letterSpacing: '-0.02em' }}>Callora</span>
-            </Link>
-            <div style={{ display: 'flex', gap: 4 }}>
-              {['Features', 'Pricing', 'Industries'].map(l => (
-                <a key={l} href="#" style={{ padding: '6px 12px', fontSize: 13.5, fontWeight: 500, color: '#64748b', textDecoration: 'none', borderRadius: 6, transition: 'all 0.15s' }}
-                  onMouseEnter={e => { e.target.style.color = '#0f172a'; e.target.style.background = '#f8fafc'; }}
-                  onMouseLeave={e => { e.target.style.color = '#64748b'; e.target.style.background = 'transparent'; }}>{l}</a>
-              ))}
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <Link to="/login" style={{ padding: '7px 16px', fontSize: 13.5, fontWeight: 500, color: '#374151', textDecoration: 'none', borderRadius: 7, transition: 'background 0.15s' }}
-              onMouseEnter={e => e.target.style.background = '#f3f4f6'} onMouseLeave={e => e.target.style.background = 'transparent'}>Sign in</Link>
-            <Link to="/register" style={{ padding: '7px 18px', fontSize: 13.5, fontWeight: 600, color: 'white', background: '#4f46e5', textDecoration: 'none', borderRadius: 7, boxShadow: '0 1px 2px rgba(79,70,229,0.4)' }}>Get started free</Link>
-          </div>
+    <section style={{ padding: '120px 5%', background: 'var(--cream-100)' }}>
+      <div style={{ maxWidth: 1180, margin: '0 auto' }}>
+        <div style={{ textAlign: 'center', marginBottom: 56 }}>
+          <h2 style={{ font: "800 clamp(28px,4vw,52px)/1.05 'Inter Tight'", letterSpacing: '-0.03em', maxWidth: 820, margin: '0 auto 16px' }}>
+            One platform for every voice agent you'll need.
+          </h2>
+          <p style={{ font: "500 17px/1.6 'Inter'", color: '#52525F', maxWidth: 600, margin: '0 auto' }}>
+            From the first cold call to the final renewal — deploy production-grade voice agents for any function.
+          </p>
         </div>
-      </nav>
-
-      {/* ── HERO ───────────────────────────────────────────────────────────── */}
-      <section style={{ maxWidth: 1200, margin: '0 auto', padding: '80px 24px 60px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 60, alignItems: 'center' }}>
-          {/* Left */}
-          <div>
-            <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#eef2ff', border: '1px solid #c7d2fe', borderRadius: 100, padding: '4px 12px 4px 6px', marginBottom: 24 }}>
-                <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#4f46e5' }} />
-                <span style={{ fontSize: 12, fontWeight: 600, color: '#4338ca', letterSpacing: '0.02em' }}>AI Voice Agent Platform · Built for India</span>
-              </div>
-            </motion.div>
-
-            <motion.h1 initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.55, delay: 0.08, ease: [0.16, 1, 0.3, 1] }}
-              style={{ fontSize: 'clamp(36px, 4.5vw, 58px)', fontWeight: 900, lineHeight: 1.06, letterSpacing: '-0.04em', color: '#0f172a', margin: '0 0 20px' }}>
-              The Voice Agent Platform<br />
-              <span style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>to Scale Lead Qualification</span>
-            </motion.h1>
-
-            <motion.p initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.18 }}
-              style={{ fontSize: 17, color: '#475569', lineHeight: 1.7, marginBottom: 32, maxWidth: 460 }}>
-              Call every new inquiry in under 60 seconds. Qualify budget, intent and timeline at scale — in Hindi, English, and 20+ Indian languages.
-            </motion.p>
-
-            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, delay: 0.26 }}
-              style={{ display: 'flex', gap: 10, marginBottom: 40, flexWrap: 'wrap' }}>
-              <Link to="/register" style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '12px 24px', background: '#4f46e5', color: 'white', fontSize: 14.5, fontWeight: 600, textDecoration: 'none', borderRadius: 8, boxShadow: '0 2px 8px rgba(79,70,229,0.4)' }}>
-                Start free trial
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-              </Link>
-              <Link to="/login" style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '12px 24px', background: 'white', color: '#374151', fontSize: 14.5, fontWeight: 600, textDecoration: 'none', borderRadius: 8, border: '1px solid #e5e7eb' }}>
-                <IconPhone size={14} color="#374151" />
-                See a live demo
-              </Link>
-            </motion.div>
-
-            {/* Stats row */}
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5, delay: 0.38 }}
-              style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 0, borderTop: '1px solid #f1f5f9', paddingTop: 24 }}>
-              {STATS.map((s, i) => (
-                <div key={i} style={{ paddingRight: 20, borderRight: i < 3 ? '1px solid #f1f5f9' : 'none', paddingLeft: i > 0 ? 20 : 0 }}>
-                  <div style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', letterSpacing: '-0.03em' }}>{s.value}</div>
-                  <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 2, lineHeight: 1.3 }}>{s.label}</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14 }}>
+          {USE_CASES.map((u, i) => (
+            <div key={i} className={`panel-${u.panel} tx-waves`} style={{ borderRadius: 22, padding: 28, display: 'flex', flexDirection: 'column', gap: 18, minHeight: 320, position: 'relative' }}>
+              <span className="vx-corner vx-corner-tr" style={{ color: 'rgba(20,20,40,0.25)' }} />
+              <div style={{ font: "700 22px/1.15 'Inter Tight'", letterSpacing: '-0.025em', color: '#0B0B14' }}>{u.title}</div>
+              <div style={{ font: "500 14px/1.55 'Inter'", color: '#2B2B36', flex: 1 }}>{u.body}</div>
+              <div style={{ padding: '14px 16px', borderRadius: 14, background: 'rgba(255,253,247,0.85)', border: '1px solid rgba(20,20,40,0.07)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.7)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ font: "800 20px/1 'Inter Tight'", letterSpacing: '-0.03em', color: '#0B0B14' }}>{u.stat}</div>
+                  <div style={{ font: '500 11px/1 Inter', color: '#52525F', marginTop: 4 }}>{u.statLabel}</div>
                 </div>
-              ))}
-            </motion.div>
-          </div>
-
-          {/* Right: Product mockup */}
-          <motion.div initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.65, delay: 0.15, ease: [0.16, 1, 0.3, 1] }}>
-            <ProductMockup />
-          </motion.div>
-        </div>
-      </section>
-
-      {/* ── TRUST BAR ──────────────────────────────────────────────────────── */}
-      <div style={{ borderTop: '1px solid #f1f5f9', borderBottom: '1px solid #f1f5f9', padding: '14px 24px' }}>
-        <div style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
-          <span style={{ fontSize: 12, color: '#94a3b8', marginRight: 4 }}>Trusted infrastructure:</span>
-          {['TRAI DND Compliant', 'SOC 2 Certified', 'Hosted in India', 'End-to-end encrypted', '99.9% Uptime SLA'].map(item => (
-            <div key={item} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 12px', background: '#f8fafc', borderRadius: 100, border: '1px solid #e2e8f0' }}>
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>
-              <span style={{ fontSize: 12, fontWeight: 500, color: '#374151' }}>{item}</span>
+                <button style={{ font: '600 12px/1 Inter', color: '#fff', background: '#0B0B14', border: 0, borderRadius: 8, padding: '8px 12px', display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
+                  <Play size={9} /> Demo
+                </button>
+              </div>
             </div>
           ))}
         </div>
       </div>
+    </section>
+  );
+}
 
-      {/* ── USE CASES ──────────────────────────────────────────────────────── */}
-      <section style={{ maxWidth: 1200, margin: '0 auto', padding: '80px 24px' }}>
-        <Reveal>
-          <div style={{ marginBottom: 48 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#4f46e5', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 10 }}>Use cases</div>
-            <h2 style={{ fontSize: 'clamp(28px, 3.5vw, 40px)', fontWeight: 800, letterSpacing: '-0.03em', color: '#0f172a', margin: 0 }}>Built for every real estate workflow</h2>
-          </div>
-        </Reveal>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
-          {USE_CASES.map((u, i) => (
-            <Reveal key={i} delay={i * 0.07}>
-              <motion.div whileHover={{ y: -3, boxShadow: '0 12px 40px rgba(0,0,0,0.08)' }}
-                style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 14, padding: '24px', height: '100%', cursor: 'default', transition: 'box-shadow 0.2s' }}>
-                <div style={{ width: 40, height: 40, borderRadius: 10, background: u.color, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
-                  <u.icon size={18} color={u.iconColor} />
-                </div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>{u.label}</div>
-                <div style={{ fontSize: 13.5, color: '#64748b', lineHeight: 1.65, marginBottom: 20 }}>{u.description}</div>
-                <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 16 }}>
-                  <div style={{ fontSize: 24, fontWeight: 800, color: u.iconColor, letterSpacing: '-0.03em' }}>{u.stat}</div>
-                  <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>{u.statLabel}</div>
-                </div>
-              </motion.div>
-            </Reveal>
-          ))}
+/* ── Stats panel ─────────────────────────────────────────────────────── */
+function StatsPanel() {
+  return (
+    <section className="panel-sage tx-waves" style={{ padding: '120px 5%' }}>
+      <div style={{ maxWidth: 1180, margin: '0 auto' }}>
+        <div style={{ textAlign: 'center', marginBottom: 64 }}>
+          <h2 style={{ font: "800 clamp(28px,4vw,52px)/1.05 'Inter Tight'", letterSpacing: '-0.03em' }}>
+            Powering voice agents across India at scale.
+          </h2>
         </div>
-      </section>
-
-      {/* ── HOW IT WORKS ───────────────────────────────────────────────────── */}
-      <section style={{ background: '#f8fafc', borderTop: '1px solid #f1f5f9', borderBottom: '1px solid #f1f5f9' }}>
-        <div style={{ maxWidth: 1200, margin: '0 auto', padding: '80px 24px' }}>
-          <Reveal>
-            <div style={{ marginBottom: 48 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#4f46e5', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 10 }}>How it works</div>
-              <h2 style={{ fontSize: 'clamp(28px, 3.5vw, 40px)', fontWeight: 800, letterSpacing: '-0.03em', color: '#0f172a', margin: 0 }}>Live in under 30 minutes</h2>
-            </div>
-          </Reveal>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 2 }}>
-            {HOW_IT_WORKS.map((s, i) => (
-              <Reveal key={i} delay={i * 0.1}>
-                <div style={{ padding: '0 24px 0 0', borderRight: i < 3 ? '1px solid #e2e8f0' : 'none', marginRight: i < 3 ? 24 : 0 }}>
-                  <div style={{ fontSize: 11, fontWeight: 800, color: '#4f46e5', letterSpacing: '0.08em', marginBottom: 16 }}>{s.n}</div>
-                  <div style={{ fontSize: 15.5, fontWeight: 700, color: '#0f172a', marginBottom: 10, lineHeight: 1.3 }}>{s.title}</div>
-                  <div style={{ fontSize: 13.5, color: '#64748b', lineHeight: 1.7 }}>{s.body}</div>
-                </div>
-              </Reveal>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ── FEATURES ───────────────────────────────────────────────────────── */}
-      <section style={{ maxWidth: 1200, margin: '0 auto', padding: '80px 24px' }}>
-        <Reveal>
-          <div style={{ marginBottom: 48 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#4f46e5', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 10 }}>Platform</div>
-            <h2 style={{ fontSize: 'clamp(28px, 3.5vw, 40px)', fontWeight: 800, letterSpacing: '-0.03em', color: '#0f172a', margin: 0 }}>Everything you need to close more deals</h2>
-          </div>
-        </Reveal>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 24 }}>
           {[
-            { Icon: IconZap,      title: 'Sub-second responses',   body: 'Responses in under 800ms. No dead air, no lag. Conversations flow like a real call.' },
-            { Icon: IconGlobe,    title: '20+ Indian languages',   body: 'English, Hindi, Tamil, Telugu, Marathi and more — even mid-call language switching.' },
-            { Icon: IconBarChart, title: 'Structured lead scores',  body: 'Every call produces intent, budget, timeline, objections — ready for your CRM.' },
-            { Icon: IconBook,     title: 'Your knowledge base',    body: 'Upload project brochures and price lists. The agent answers questions with your exact data.' },
-            { Icon: IconWebhook,  title: 'Real-time hot-lead alerts', body: 'The moment someone is interested, your closer gets a full call summary by webhook or WhatsApp.' },
-            { Icon: IconPhone,    title: 'High-volume outbound',   body: 'Run thousands of concurrent calls with automatic retries, DNC compliance and live monitoring.' },
-          ].map(({ Icon, title, body }, i) => (
-            <Reveal key={i} delay={i * 0.07}>
-              <div style={{ padding: '24px', border: '1px solid #e2e8f0', borderRadius: 14, background: 'white' }}
-                onMouseEnter={e => e.currentTarget.style.borderColor = '#c7d2fe'}
-                onMouseLeave={e => e.currentTarget.style.borderColor = '#e2e8f0'}>
-                <div style={{ width: 38, height: 38, borderRadius: 9, background: '#eef2ff', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}>
-                  <Icon size={18} color="#4f46e5" />
-                </div>
-                <div style={{ fontSize: 14.5, fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>{title}</div>
-                <div style={{ fontSize: 13.5, color: '#64748b', lineHeight: 1.65 }}>{body}</div>
+            { icon: <BarChart2 size={22} />, color: '#E63946', value: '1.2M+', body: 'Lead-qualification conversations handled.' },
+            { icon: <Zap size={22} />, color: '#F4B233', value: '8×', body: 'More productive than traditional outbound call teams.' },
+            { icon: <Phone size={22} />, color: '#1F8A5B', value: '83%', body: 'Of property-related queries resolved autonomously.' },
+            { icon: <Shield size={22} />, color: '#9D1924', value: '99.9%', body: 'Uptime during peak Diwali and FY-end seasons.' },
+          ].map((s, i) => (
+            <div key={i} style={{ display: 'flex', gap: 16, alignItems: 'flex-start', padding: 24, borderRadius: 18, background: 'rgba(255,253,247,0.75)', border: '1px solid rgba(20,20,40,0.08)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.7)' }}>
+              <div style={{ width: 44, height: 44, borderRadius: 11, background: s.color, color: '#fff', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 4px 12px ${s.color}40` }}>{s.icon}</div>
+              <div>
+                <div style={{ font: "800 28px/1 'Inter Tight'", letterSpacing: '-0.03em', color: '#0B0B14', marginBottom: 8 }}>{s.value}</div>
+                <div style={{ font: "500 13px/1.55 'Inter'", color: '#2B2B36' }}>{s.body}</div>
               </div>
-            </Reveal>
+            </div>
           ))}
         </div>
-      </section>
+      </div>
+    </section>
+  );
+}
 
-      {/* ── TESTIMONIALS ───────────────────────────────────────────────────── */}
-      <section style={{ background: '#f8fafc', borderTop: '1px solid #f1f5f9', borderBottom: '1px solid #f1f5f9' }}>
-        <div style={{ maxWidth: 1200, margin: '0 auto', padding: '80px 24px' }}>
-          <Reveal>
-            <div style={{ marginBottom: 48 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#4f46e5', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 10 }}>Testimonials</div>
-              <h2 style={{ fontSize: 'clamp(28px, 3.5vw, 40px)', fontWeight: 800, letterSpacing: '-0.03em', color: '#0f172a', margin: 0 }}>Real estate teams are already closing more</h2>
-            </div>
-          </Reveal>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
-            {TESTIMONIALS.map((t, i) => (
-              <Reveal key={i} delay={i * 0.1}>
-                <div style={{ background: 'white', border: '1px solid #e2e8f0', borderRadius: 14, padding: '28px' }}>
-                  {/* Stars */}
-                  <div style={{ display: 'flex', gap: 2, marginBottom: 16 }}>
-                    {[...Array(5)].map((_, i) => (
-                      <svg key={i} width="14" height="14" viewBox="0 0 24 24" fill="#f59e0b" stroke="none"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-                    ))}
-                  </div>
-                  <p style={{ fontSize: 14, color: '#374151', lineHeight: 1.75, margin: '0 0 24px' }}>"{t.quote}"</p>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#4f46e5', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, flexShrink: 0 }}>{t.avatar}</div>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{t.name}</div>
-                      <div style={{ fontSize: 12, color: '#94a3b8' }}>{t.role}</div>
-                    </div>
-                  </div>
-                </div>
-              </Reveal>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ── CTA ────────────────────────────────────────────────────────────── */}
-      <section style={{ background: '#0f172a', position: 'relative', overflow: 'hidden' }}>
-        {/* bg gradient */}
-        <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(ellipse 80% 60% at 50% 0%, rgba(79,70,229,0.25) 0%, transparent 70%)', pointerEvents: 'none' }} />
-        <div style={{ maxWidth: 700, margin: '0 auto', padding: '100px 24px', textAlign: 'center', position: 'relative' }}>
-          <Reveal>
-            <div style={{ display: 'inline-block', fontSize: 12, fontWeight: 700, color: '#818cf8', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 20 }}>Get started today</div>
-            <h2 style={{ fontSize: 'clamp(30px, 4vw, 52px)', fontWeight: 900, color: '#f8fafc', letterSpacing: '-0.035em', lineHeight: 1.08, margin: '0 0 18px' }}>
-              Never miss a hot lead again
-            </h2>
-            <p style={{ fontSize: 16, color: '#94a3b8', lineHeight: 1.7, margin: '0 0 40px' }}>
-              Start your first campaign in under 30 minutes. Free trial included — no credit card required.
-            </p>
-            <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-              <Link to="/register" style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '13px 28px', background: '#4f46e5', color: 'white', fontSize: 15, fontWeight: 600, textDecoration: 'none', borderRadius: 8, boxShadow: '0 2px 16px rgba(79,70,229,0.5)' }}>
-                Start free trial
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-              </Link>
-              <Link to="/login" style={{ display: 'inline-flex', alignItems: 'center', padding: '13px 28px', background: 'rgba(255,255,255,0.07)', color: '#e2e8f0', fontSize: 15, fontWeight: 600, textDecoration: 'none', borderRadius: 8, border: '1px solid rgba(255,255,255,0.12)' }}>
-                Sign in
-              </Link>
-            </div>
-          </Reveal>
-        </div>
-      </section>
-
-      {/* ── FOOTER ─────────────────────────────────────────────────────────── */}
-      <footer style={{ background: '#0f172a', borderTop: '1px solid rgba(255,255,255,0.06)', padding: '48px 24px 28px' }}>
-        <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 40, marginBottom: 40 }}>
+/* ── Knowledge panel ─────────────────────────────────────────────────── */
+function KnowledgePanel() {
+  return (
+    <section className="panel-mist tx-dots" style={{ padding: '120px 5%' }}>
+      <div className="vx-lp-2col" style={{ maxWidth: 1180, margin: '0 auto', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 64, alignItems: 'center' }}>
+        <div style={{ padding: 32, background: 'rgba(255,253,247,0.85)', borderRadius: 22, border: '1px solid rgba(20,20,40,0.08)', boxShadow: '0 18px 40px rgba(20,20,40,0.06)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+            <div style={{ width: 40, height: 40, borderRadius: 10, background: '#0B0B14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Book size={18} color="#fff" /></div>
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-                <div style={{ width: 28, height: 28, background: '#4f46e5', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13.4a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.62 2.72h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.91 10a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-                </div>
-                <span style={{ fontWeight: 700, fontSize: 15, color: '#f8fafc', letterSpacing: '-0.02em' }}>Callora</span>
-              </div>
-              <p style={{ fontSize: 13, color: '#475569', lineHeight: 1.7, maxWidth: 220, margin: 0 }}>AI voice agents for real estate teams that need to call at scale.</p>
+              <div style={{ font: "700 13px/1 'Inter Tight'", letterSpacing: '-0.01em' }}>Sector 65 Project</div>
+              <div style={{ font: '500 11px/1 Inter', color: '#52525F', marginTop: 3 }}>14 documents · indexed 2m ago</div>
             </div>
+          </div>
+          {[['Brochure_Sec65.pdf', '2.1 MB · 24 pages', true], ['Pricing_Q4.xlsx', '84 KB · 6 sheets', false], ['Floor_plans_2BHK.pdf', '1.4 MB · 8 plans', false], ['RERA_HRERA_2024.pdf', '440 KB · 12 pages', false]].map(([n, m, active], i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 10, background: active ? 'rgba(230,57,70,0.06)' : 'rgba(20,20,40,0.03)', border: active ? '1px solid rgba(230,57,70,0.18)' : '1px solid transparent' }}>
+              <div style={{ width: 26, height: 26, borderRadius: 6, background: active ? 'var(--red-500)' : 'var(--cream-200)', color: active ? '#fff' : '#52525F', display: 'flex', alignItems: 'center', justifyContent: 'center', font: "700 8px/1 'JetBrains Mono'", letterSpacing: '0.04em' }}>{n.split('.').pop().toUpperCase().slice(0, 3)}</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ font: '600 12px/1.1 Inter', color: '#0B0B14' }}>{n}</div>
+                <div style={{ font: '500 10.5px/1 Inter', color: '#8B8B98', marginTop: 3 }}>{m}</div>
+              </div>
+              {active && <Check size={13} color="#1F8A5B" />}
+            </div>
+          ))}
+        </div>
+        <div>
+          <span className="vx-stamp" style={{ color: '#475569', background: 'rgba(255,253,247,0.55)', marginBottom: 18, display: 'inline-flex' }}>Knowledge base</span>
+          <h2 style={{ font: "700 clamp(24px,3vw,38px)/1.15 'Inter Tight'", letterSpacing: '-0.025em', marginBottom: 18, marginTop: 16, maxWidth: 480 }}>
+            Train your voice agent with what it needs to sound smart.
+          </h2>
+          <p style={{ font: "500 16px/1.6 'Inter'", color: '#2B2B36', marginBottom: 28, maxWidth: 480 }}>
+            Upload brochures, price lists, project PDFs. Velryx grounds every answer in your real data — no hallucination on RERA numbers, no made-up amenities.
+          </p>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            {['Brochure_Sec65.pdf', 'RERA_certs.zip', 'Pricing_Q4.xlsx', 'FAQs.md'].map(f => (
+              <span key={f} style={{ padding: '7px 12px', borderRadius: 9999, background: 'rgba(255,253,247,0.85)', border: '1px solid rgba(20,20,40,0.10)', font: "500 12px/1 'Inter'", color: '#2B2B36' }}>{f}</span>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ── Pricing ─────────────────────────────────────────────────────────── */
+function PricingPanel() {
+  return (
+    <section className="panel-sand tx-cross" style={{ padding: '120px 5%' }}>
+      <div style={{ maxWidth: 820, margin: '0 auto', textAlign: 'center' }}>
+        <span className="vx-stamp-tilt right" style={{ color: 'var(--red-700)', marginBottom: 18, display: 'inline-flex' }}>Pricing</span>
+        <h2 style={{ font: "800 clamp(28px,4vw,52px)/1.05 'Inter Tight'", letterSpacing: '-0.03em', marginTop: 18, marginBottom: 16 }}>
+          Priced for <em style={{ fontFamily: "'Instrument Serif',serif", fontStyle: 'italic', color: 'var(--red-600)' }}>Indian budgets.</em>
+        </h2>
+        <div className="marginalia" style={{ display: 'inline-block', marginBottom: 56 }}>Pay-as-you-go. No seat fees. No hidden setup costs.</div>
+
+        {/* Single price card */}
+        <div className="ticket" style={{ maxWidth: 440, margin: '0 auto', padding: '44px 48px', background: 'rgba(255,253,247,0.97)', borderRadius: 22, border: '2px solid #0B0B14', boxShadow: '0 24px 60px rgba(20,20,40,0.12)', position: 'relative' }}>
+          <span className="vx-stamp-tilt" style={{ color: '#fff', background: 'var(--red-500)', border: '1.5px solid var(--red-500)', position: 'absolute', top: -16, right: 24 }}>Simple pricing</span>
+          <div style={{ font: "italic 400 15px/1 'Instrument Serif',serif", color: '#52525F', marginBottom: 12 }}>Billed at</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 6, marginBottom: 8 }}>
+            <span style={{ fontFamily: "'Instrument Serif',serif", fontSize: 80, lineHeight: 1, color: '#0B0B14', letterSpacing: '-0.03em' }}>₹6</span>
+            <span style={{ font: "600 22px/1 'Inter Tight'", color: '#52525F', letterSpacing: '-0.02em' }}>/&thinsp;minute</span>
+          </div>
+          <div className="vx-note" style={{ marginBottom: 32, fontSize: 13 }}>
+            Per AI agent minute. Carrier charges (~₹2/min) billed separately.
+          </div>
+          <hr className="stitch-thick" style={{ margin: '0 0 24px' }} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
             {[
-              { title: 'Product', links: ['Features', 'Pricing', 'Changelog'] },
-              { title: 'Company', links: ['About', 'Blog', 'Careers'] },
-              { title: 'Legal', links: ['Privacy', 'Terms', 'Security'] },
-            ].map(col => (
-              <div key={col.title}>
-                <div style={{ fontSize: 11.5, fontWeight: 600, color: '#475569', marginBottom: 14, letterSpacing: '0.06em', textTransform: 'uppercase' }}>{col.title}</div>
-                {col.links.map(l => (
-                  <a key={l} href="#" style={{ display: 'block', fontSize: 13, color: '#475569', marginBottom: 10, textDecoration: 'none' }}
-                    onMouseEnter={e => e.target.style.color = '#94a3b8'} onMouseLeave={e => e.target.style.color = '#475569'}>{l}</a>
-                ))}
+              'Pay-as-you-go · no commitment',
+              'All 20+ Indian languages',
+              'Knowledge-base RAG included',
+              'Hot-lead WhatsApp alerts',
+              'TRAI DND scrubbing',
+              'IST calling-hours enforcement',
+              'Recording &amp; transcript storage',
+            ].map((f, i) => (
+              <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '9px 0', borderBottom: i < 6 ? '1.5px dashed rgba(20,20,40,0.10)' : 'none' }}>
+                <Check size={13} color="var(--red-600)" style={{ flexShrink: 0, marginTop: 2 }} />
+                <span style={{ font: "500 13.5px/1.35 'Inter'", color: '#0B0B14' }} dangerouslySetInnerHTML={{ __html: f }} />
               </div>
             ))}
           </div>
-          <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 24, display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#334155' }}>
-            <span>© 2025 Callora Technologies. All rights reserved.</span>
-            <span>Made in India 🇮🇳</span>
-          </div>
+          <Link to="/register" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: '#0B0B14', color: '#fff', borderRadius: 9999, padding: '14px 28px', font: "600 14px/1 'Inter'", cursor: 'pointer', textDecoration: 'none', marginTop: 28 }}>
+            Get started <ArrowRight size={13} />
+          </Link>
+          <div style={{ font: "italic 400 12px/1 'Instrument Serif',serif", color: '#8B8B98', marginTop: 12 }}>₹120 free credits on signup · ₹10,000 one-time setup fee.</div>
         </div>
-      </footer>
+      </div>
+    </section>
+  );
+}
+
+/* ── FAQ ─────────────────────────────────────────────────────────────── */
+const FAQS = [
+  { q: 'How does Velryx handle Hindi-English code-switching mid-call?', a: "Velryx auto-detects the language a caller uses and switches in real time — even mid-sentence. We use Sarvam AI for speech and a fine-tuned LLM for response. NRI callers can start in English, drop into Hindi for negotiation, and the agent stays natural throughout." },
+  { q: 'Is Velryx TRAI-DND compliant?', a: "Yes. Every uploaded CSV is scrubbed against the National Do Not Call registry before any campaign runs. We enforce IST calling hours (10am–7pm by default). Opt-outs are honored immediately and propagated across all your assistants." },
+  { q: 'Can the AI book a site visit on its own?', a: "Yes. Connect your Google / Outlook calendar (or a Calendly link) and the agent will offer real time-slots, confirm with the lead, and drop a calendar invite. The booking shows up in your dashboard within seconds." },
+  { q: 'What does it cost in real rupee terms?', a: "Pay-as-you-go: ₹6/min for the AI agent, plus Plivo's per-minute carrier rate (~₹2/min for Indian DIDs). A typical 3-minute qualification call lands around ₹24. Most teams break even after 1–2 closed deals." },
+  { q: 'How long does setup take?', a: "Twenty to thirty minutes if you have a Plivo account already. We give you three starter assistants and one starter campaign template. Upload a CSV and you're live." },
+];
+
+function FAQPanel() {
+  const [open, setOpen] = useState(0);
+  return (
+    <section style={{ padding: '120px 5%', background: 'var(--cream-100)' }}>
+      <div style={{ maxWidth: 980, margin: '0 auto' }}>
+        <div className="vx-lp-2col" style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr', gap: 56, alignItems: 'flex-start', marginBottom: 32 }}>
+          <div>
+            <span className="vx-stamp-tilt" style={{ color: 'var(--red-700)', marginBottom: 14, display: 'inline-flex' }}>Questions</span>
+            <h2 style={{ font: "800 clamp(28px,4vw,44px)/1.0 'Inter Tight'", letterSpacing: '-0.03em', marginTop: 18 }}>
+              Real <em style={{ fontFamily: "'Instrument Serif',serif", fontStyle: 'italic', color: 'var(--red-600)' }}>answers.</em>
+            </h2>
+          </div>
+          <p style={{ font: "500 16px/1.6 'Inter'", color: '#52525F', paddingTop: 12 }}>
+            Most of these came from our customers' first 30 minutes on the platform.
+          </p>
+        </div>
+        <div>
+          {FAQS.map((f, i) => (
+            <div key={i} className="faq-row" data-open={open === i ? 'true' : 'false'}>
+              <div className="faq-q" onClick={() => setOpen(open === i ? -1 : i)}>
+                <span className="num">{String(i + 1).padStart(2, '0')}.</span>
+                <span style={{ flex: 1 }}>{f.q}</span>
+                <span className="toggle-icon">
+                  <svg width="10" height="10" viewBox="0 0 10 10"><path d="M5 1v8M1 5h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
+                </span>
+              </div>
+              {open === i && <div className="faq-a">{f.a}</div>}
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ── CTA ─────────────────────────────────────────────────────────────── */
+function CTASection() {
+  return (
+    <section className="panel-terracotta tx-cross" style={{ padding: '120px 5%', textAlign: 'center' }}>
+      <div style={{ maxWidth: 780, margin: '0 auto' }}>
+        <span className="vx-stamp" style={{ color: '#9D1924', background: 'rgba(255,253,247,0.55)', marginBottom: 22, display: 'inline-flex' }}>Get started today</span>
+        <h2 style={{ font: "800 clamp(28px,4.5vw,56px)/1.05 'Inter Tight'", letterSpacing: '-0.03em', margin: '18px 0' }}>Never miss a hot lead again.</h2>
+        <p style={{ font: "500 17px/1.6 'Inter'", color: '#2B2B36', maxWidth: 480, margin: '0 auto 36px' }}>
+          Start your first campaign in under 30 minutes. Free credits, India-hosted.
+        </p>
+        <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+          <Link to="/register" style={{ padding: '14px 28px', background: '#0B0B14', color: '#fff', font: "600 15px/1 'Inter'", borderRadius: 9999, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            Try Velryx <ArrowRight size={14} />
+          </Link>
+          <a style={{ padding: '13px 26px', background: 'rgba(255,253,247,0.65)', color: '#0B0B14', font: "600 15px/1 'Inter'", borderRadius: 9999, cursor: 'pointer', textDecoration: 'none', border: '1px solid rgba(20,20,40,0.18)' }}>
+            Book a demo
+          </a>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────── */
+function Footer() {
+  return (
+    <footer style={{ background: '#0B0B14', color: '#8B8B98', padding: '56px 5% 32px' }}>
+      <div className="vx-lp-footer" style={{ maxWidth: 1180, margin: '0 auto', display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 48, marginBottom: 40 }}>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+            <div style={{ width: 28, height: 28, borderRadius: 7, background: 'var(--grad-brand)' }} />
+            <span style={{ font: "700 16px/1 'Inter Tight'", letterSpacing: '-0.02em', color: '#fff' }}>Velryx</span>
+          </div>
+          <p style={{ font: "500 13px/1.65 'Inter'", maxWidth: 280, color: '#8B8B98' }}>
+            AI voice agents for Indian real-estate teams that need to call at scale.
+          </p>
+        </div>
+        {[
+          { title: 'Product', links: ['Features', 'Pricing', 'Industries', 'Changelog'] },
+          { title: 'Company', links: ['About', 'Blog', 'Customers', 'Careers'] },
+          { title: 'Legal',   links: ['Privacy', 'Terms', 'Security', 'TRAI compliance'] },
+        ].map(col => (
+          <div key={col.title}>
+            <div style={{ font: "700 10px/1 'Inter'", letterSpacing: '0.10em', textTransform: 'uppercase', color: '#52525F', marginBottom: 16 }}>{col.title}</div>
+            {col.links.map(l => (
+              <a key={l} style={{ display: 'block', font: "500 13px/1 'Inter'", color: '#B5B5BF', marginBottom: 11, textDecoration: 'none', cursor: 'pointer' }}>{l}</a>
+            ))}
+          </div>
+        ))}
+      </div>
+      <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 24, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+        <span style={{ font: "500 12px/1 'Inter'", color: '#52525F' }}>© 2026 Velryx Technologies · Made in India 🇮🇳</span>
+        <span style={{ font: "500 12px/1 'Inter'", color: '#52525F' }}>TRAI · SOC 2 · ISO 27001</span>
+      </div>
+    </footer>
+  );
+}
+
+/* ── Main export ─────────────────────────────────────────────────────── */
+export default function Landing() {
+  return (
+    <div style={{ background: 'var(--cream-100)', color: '#0B0B14', minHeight: '100vh', overflowX: 'hidden' }}>
+      <ScrollProgressBar />
+      <NavBar />
+      <Hero />
+      <TrustBar />
+      <UseCasesPanel />
+      <StatsPanel />
+      <KnowledgePanel />
+      <PricingPanel />
+      <FAQPanel />
+      <CTASection />
+      <Footer />
     </div>
   );
 }

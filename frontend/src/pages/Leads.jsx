@@ -66,6 +66,7 @@ export default function Leads() {
   const { showToast } = useToast();
   const [leads, setLeads] = useState([]);
   const [campaigns, setCampaigns] = useState([]);
+  const [agents, setAgents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [filter, setFilter] = useState({ campaign_id: '', status: '', search: '' });
@@ -84,9 +85,10 @@ export default function Leads() {
   async function loadAll() {
     setLoading(true);
     try {
-      const [l, c] = await Promise.all([api.leads.list(filter), api.campaigns.list()]);
+      const [l, c, a] = await Promise.all([api.leads.list(filter), api.campaigns.list(), api.agents.list()]);
       setLeads(l.leads || []);
       setCampaigns(c.campaigns || []);
+      setAgents(a.agents || []);
     } catch (e) {
       setError('Failed to load leads');
     }
@@ -150,16 +152,34 @@ export default function Leads() {
     loadAll();
   }
 
-  async function callLead(lead) {
+  // agentId is optional. Passing it makes the choice explicit for THIS call and
+  // pins it to the lead; omitting it lets the backend resolve lead → campaign →
+  // most-recent, which is what the quick Call button relies on.
+  async function callLead(lead, agentId) {
     setCallingId(lead.id);
     try {
-      await api.calls.trigger(lead.id);
-      showToast(`Calling ${lead.name || lead.phone}…`, 'success');
+      const r = await api.calls.trigger(lead.id, agentId);
+      const who = r?.agent?.name ? ` with ${r.agent.name}` : '';
+      showToast(`Calling ${lead.name || lead.phone}${who}…`, 'success');
       loadAll();
     } catch (e) {
       showToast(e.message || 'Call failed', 'error');
     }
     setCallingId(null);
+  }
+
+  // Inline agent assignment from the table. Optimistic so the dropdown does not
+  // snap back while the PATCH is in flight; reverted on failure.
+  async function assignAgent(lead, agentId) {
+    const prev = lead.agent_id || null;
+    const next = agentId || null;
+    setLeads(ls => ls.map(l => (l.id === lead.id ? { ...l, agent_id: next } : l)));
+    try {
+      await api.leads.update(lead.id, { agent_id: next });
+    } catch (e) {
+      setLeads(ls => ls.map(l => (l.id === lead.id ? { ...l, agent_id: prev } : l)));
+      showToast(e.message || 'Could not assign agent', 'error');
+    }
   }
 
   const sf = k => e => setFilter(p => ({ ...p, [k]: e.target.value }));
@@ -222,6 +242,7 @@ export default function Leads() {
                 <th>Name</th>
                 <th>Status</th>
                 <th>Score</th>
+                <th>Agent</th>
                 <th>Campaign</th>
                 <th>Calls</th>
                 <th>Added</th>
@@ -240,6 +261,19 @@ export default function Leads() {
                         {l.score}
                       </span>
                     ) : '—'}
+                  </td>
+                  <td>
+                    <select
+                      className="input"
+                      style={{ fontSize: '0.8rem', padding: '3px 6px', maxWidth: 150,
+                               color: l.agent_id ? 'var(--text)' : 'var(--text-muted)' }}
+                      value={l.agent_id || ''}
+                      onChange={e => assignAgent(l, e.target.value)}
+                      title={l.agent_id ? 'Agent that will place the call' : 'No agent set — falls back to the campaign\'s agent'}
+                    >
+                      <option value="">— campaign default —</option>
+                      {agents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    </select>
                   </td>
                   <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
                     {campaigns.find(c => c.id === l.campaign_id)?.name || '—'}
@@ -319,7 +353,7 @@ export default function Leads() {
       )}
 
       {selectedLead && <LeadDetailModal lead={selectedLead} onClose={() => setSelectedLead(null)} />}
-      {curlLead && <CurlModal lead={curlLead} onClose={() => setCurlLead(null)} onCall={() => { setCurlLead(null); callLead(curlLead); }} />}
+      {curlLead && <CallModal lead={curlLead} agents={agents} onClose={() => setCurlLead(null)} onCall={agentId => { setCurlLead(null); callLead(curlLead, agentId); }} />}
       {csvPreview && (
         <CSVPreviewModal
           preview={csvPreview}
@@ -332,15 +366,24 @@ export default function Leads() {
   );
 }
 
-function CurlModal({ lead, onClose, onCall }) {
+// Call modal — this is where the agent is chosen immediately before dialling.
+// Defaults to the lead's pinned agent so repeat calls are one click, but any
+// agent can be picked for this one call; the backend then pins that choice.
+function CallModal({ lead, agents = [], onClose, onCall }) {
   const [copied, setCopied] = useState(false);
+  const [agentId, setAgentId] = useState(lead.agent_id || '');
   const base = window.location.origin;
   const token = localStorage.getItem('token') || '<YOUR_JWT_TOKEN>';
+
+  const selected = agents.find(a => a.id === agentId);
+  const body = agentId
+    ? `{"lead_id": "${lead.id}", "agent_id": "${agentId}"}`
+    : `{"lead_id": "${lead.id}"}`;
 
   const curlCmd = `curl -X POST ${base}/api/calls/trigger \\
   -H "Content-Type: application/json" \\
   -H "Authorization: Bearer ${token}" \\
-  -d '{"lead_id": "${lead.id}"}'`;
+  -d '${body}'`;
 
   function copy() {
     navigator.clipboard.writeText(curlCmd);
@@ -357,9 +400,30 @@ function CurlModal({ lead, onClose, onCall }) {
         </div>
         <div className="modal-body">
           <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
-            Trigger an outbound AI call to <strong>{lead.name || lead.phone}</strong> ({lead.phone}) via the API.
-            The platform will use the agent and caller ID configured in the lead's campaign.
+            Trigger an outbound AI call to <strong>{lead.name || lead.phone}</strong> ({lead.phone}).
           </p>
+
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
+              Agent for this call
+            </label>
+            <select
+              className="input"
+              style={{ width: '100%' }}
+              value={agentId}
+              onChange={e => setAgentId(e.target.value)}
+            >
+              <option value="">Use the campaign's agent</option>
+              {agents.map(a => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
+              {selected
+                ? <>This call uses <strong>{selected.name}</strong>, and {lead.name || 'this lead'} will default to it next time.</>
+                : <>No agent picked — the platform falls back to the lead's campaign, then to your most recently edited agent.</>}
+            </p>
+          </div>
 
           <div style={{ marginBottom: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
@@ -379,8 +443,8 @@ function CurlModal({ lead, onClose, onCall }) {
         </div>
         <div className="modal-footer">
           <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 6 }} onClick={onCall}>
-            <Phone size={13} /> Call Now
+          <button className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 6 }} onClick={() => onCall(agentId)}>
+            <Phone size={13} /> {selected ? `Call with ${selected.name}` : 'Call Now'}
           </button>
         </div>
       </div>

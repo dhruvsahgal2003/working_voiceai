@@ -1,9 +1,10 @@
-import { Component, lazy, Suspense } from 'react';
+import { Component, lazy, Suspense, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import Sidebar from './components/Sidebar';
+import { Bell, Plus, Menu } from 'lucide-react';
 
 class ErrorBoundary extends Component {
   state = { error: null };
@@ -32,6 +33,7 @@ import Campaigns from './pages/Campaigns';
 import Leads from './pages/Leads';
 import Assistants from './pages/Assistants';
 import CallHistory from './pages/CallHistory';
+import Messages from './pages/Messages';
 import Analytics from './pages/Analytics';
 import Billing from './pages/Billing';
 import Events from './pages/Events';
@@ -48,8 +50,53 @@ const PageSpinner = () => (
   </div>
 );
 
+const PAGE_META = {
+  '/dashboard':  { title: 'Dashboard',      sub: 'Real-time overview of your calling campaigns' },
+  '/analytics':  { title: 'Analytics',      sub: 'Deeper trends and cohort performance' },
+  '/assistants': { title: 'Assistants',     sub: 'AI voice agents on your account' },
+  '/campaigns':  { title: 'Campaigns',      sub: 'Outbound calling campaigns' },
+  '/leads':      { title: 'Leads',          sub: 'All uploaded contacts' },
+  '/history':    { title: 'Call History',   sub: 'Every call with transcript & recording' },
+  '/messages':   { title: 'Messages',       sub: 'WhatsApp conversations with your leads' },
+  '/knowledge':  { title: 'Knowledge Base', sub: 'Documents your assistants can read from' },
+  '/numbers':    { title: 'Numbers',        sub: 'Phone numbers connected to your account' },
+  '/billing':    { title: 'Billing',        sub: 'Credits, invoices, top-ups' },
+  '/settings':   { title: 'Settings',       sub: 'Profile, credentials, notifications' },
+  '/dnc':        { title: 'DNC List',       sub: 'Do Not Call registry management' },
+  '/events':     { title: 'Events',         sub: 'Webhook events and logs' },
+  '/admin':      { title: 'Admin',          sub: 'Platform administration' },
+};
+
+function Topbar({ onMenuClick }) {
+  const { pathname } = useLocation();
+  const meta = PAGE_META[pathname] || { title: 'Velryx', sub: '' };
+  return (
+    <header className="vx-topbar">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <button className="btn btn-ghost btn-icon vx-hamburger" onClick={onMenuClick} title="Menu">
+          <Menu size={18} />
+        </button>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <h1 className="vx-page-title">{meta.title}</h1>
+          {meta.sub && <div className="vx-page-sub">{meta.sub}</div>}
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <button className="btn btn-secondary btn-icon" title="Notifications">
+          <Bell size={14} />
+        </button>
+        <button className="btn btn-primary btn-sm vx-new-campaign-btn" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Plus size={13} /> <span className="vx-btn-label">New campaign</span>
+        </button>
+      </div>
+    </header>
+  );
+}
+
 function ProtectedLayout({ children }) {
   const { user, loading } = useAuth();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
   if (loading) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
       <div className="spinner" style={{ width: 40, height: 40, borderWidth: 4 }} />
@@ -57,28 +104,31 @@ function ProtectedLayout({ children }) {
   );
   if (!user) return <Navigate to="/login" replace />;
   return (
-    <div style={{ display: 'flex', minHeight: '100vh' }}>
-      <Sidebar />
-      <main style={{ flex: 1, padding: '2rem', overflowY: 'auto', background: 'var(--bg)', minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ flex: 1 }}>
+    <div className="vx-orbs" style={{ display: 'flex', minHeight: '100vh', position: 'relative' }}>
+      <span className="vx-orb" />
+      {/* Overlay — closes sidebar on mobile */}
+      <div
+        className={`vx-sidebar-overlay${sidebarOpen ? ' open' : ''}`}
+        onClick={() => setSidebarOpen(false)}
+      />
+      <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+        <Topbar onMenuClick={() => setSidebarOpen(o => !o)} />
+        <div className="vx-page-content">
           <ErrorBoundary key={window.location.pathname}>
             <motion.div
               key={window.location.pathname}
-              initial={{ opacity: 0, y: 10 }}
+              initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.2, ease: 'easeOut' }}
+              transition={{ duration: 0.18, ease: 'easeOut' }}
             >
               {children}
             </motion.div>
           </ErrorBoundary>
         </div>
-        <footer style={{ marginTop: '2rem', paddingTop: '1rem', borderTop: '1px solid var(--border)', textAlign: 'center', fontSize: 12, color: 'var(--text-muted)' }}>
+        <footer className="vx-app-footer">
           Powered by{' '}
-          <a href="https://dhruvsahgal.in" target="_blank" rel="noreferrer"
-            style={{ color: 'var(--accent)', fontWeight: 600, textDecoration: 'none' }}
-            onMouseOver={e => e.target.style.textDecoration = 'underline'}
-            onMouseOut={e => e.target.style.textDecoration = 'none'}
-          >
+          <a href="https://dhruvsahgal.in" target="_blank" rel="noreferrer" className="vx-footer-link">
             Dhruv Sahgal
           </a>
         </footer>
@@ -125,6 +175,7 @@ export default function App() {
           <Route path="/leads" element={<ProtectedLayout><Leads /></ProtectedLayout>} />
           <Route path="/history" element={<ProtectedLayout><CallHistory /></ProtectedLayout>} />
           <Route path="/calls" element={<Navigate to="/history" replace />} />
+          <Route path="/messages" element={<ProtectedLayout><Messages /></ProtectedLayout>} />
           <Route path="/analytics" element={<ProtectedLayout><Analytics /></ProtectedLayout>} />
           <Route path="/knowledge" element={<ProtectedLayout><KnowledgeBase /></ProtectedLayout>} />
           <Route path="/billing" element={<ProtectedLayout><Billing /></ProtectedLayout>} />

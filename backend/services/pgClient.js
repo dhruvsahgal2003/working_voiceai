@@ -51,7 +51,7 @@ const TO_ONE = {
   transcripts: { call_logs: 'call_id' },
   recordings:  { call_logs: 'call_id' },
   whatsapp_conversations: { whatsapp_contacts: 'contact_id' },
-  whatsapp_messages:      { whatsapp_conversations: 'conversation_id' },
+  whatsapp_messages:      { whatsapp_conversations: 'conversation_id', agents: 'agent_id', leads: 'lead_id', call_logs: 'call_id' },
 };
 const TO_MANY = {
   leads:     { call_logs: 'lead_id' },

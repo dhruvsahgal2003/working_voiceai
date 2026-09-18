@@ -261,10 +261,14 @@ async function processDialJob(job) {
   }
 
   try {
-    const { callUuid, roomName, fromNumber } = await triggerCall({ phone: lead.phone, name: lead.name, city: lead.city, propertyType: lead.property_type, budget: lead.budget, language: lead.language, leadId: lead.id, userId });
-
-    // Resolve agent: campaign.agent_id or user's most-recent agent
-    let agentId = campaign.agent_id;
+    // Resolve agent: campaign.agent_id → lead.agent_id → user's most-recent agent.
+    //
+    // The campaign's agent deliberately outranks the lead's here, which is the
+    // opposite of the manual-dial precedence in routes/calls.js. A campaign IS a
+    // choice of agent, so a campaign run must be uniform: if a lead had been
+    // pinned to another agent by an earlier one-off call, letting that win would
+    // make the campaign silently dial some leads with the wrong agent.
+    let agentId = campaign.agent_id || lead.agent_id || null;
     if (!agentId) {
       const { data: agentRow } = await supabase.from('agents')
         .select('id').eq('user_id', userId)
@@ -272,14 +276,36 @@ async function processDialJob(job) {
       agentId = agentRow?.id || null;
     }
 
+    // Insert BEFORE dialling — see routes/calls.js for why: dialOutbound blocks
+    // until answer, and the agent's start-recording request must find this row.
     const callLogId = uuidv4();
+    const roomName = `call-${lead.id}-${Date.now()}`;
+    const callUuid = `LK-${uuidv4().slice(0, 12)}`;
+
     await supabase.from('call_logs').insert({
       id: callLogId, user_id: userId, lead_id: lead.id, campaign_id: campaignId,
       agent_id: agentId,
-      plivo_call_uuid: callUuid, livekit_room_name: roomName || null,
-      from_number: fromNumber || process.env.PLIVO_FROM_NUMBER,
+      plivo_call_uuid: callUuid, livekit_room_name: roomName,
+      from_number: process.env.PLIVO_FROM_NUMBER,
       to_number: lead.phone, call_status: 'initiated', started_at: new Date().toISOString(),
     });
+
+    let dial;
+    try {
+      dial = await triggerCall({ phone: lead.phone, name: lead.name, city: lead.city, propertyType: lead.property_type, budget: lead.budget, language: lead.language, leadId: lead.id, userId, roomName, callUuid });
+    } catch (dialErr) {
+      await supabase.from('call_logs').update({
+        call_status: 'failed', outcome: 'failed', end_reason: 'dial_failed',
+        ended_at: new Date().toISOString(),
+      }).eq('id', callLogId);
+      throw dialErr;
+    }
+
+    const patch = {};
+    if (dial.callUuid && dial.callUuid !== callUuid) patch.plivo_call_uuid = dial.callUuid;
+    if (dial.roomName && dial.roomName !== roomName) patch.livekit_room_name = dial.roomName;
+    if (dial.fromNumber) patch.from_number = dial.fromNumber;
+    if (Object.keys(patch).length) await supabase.from('call_logs').update(patch).eq('id', callLogId);
 
     // NOTE: Egress recording is started by the agent via POST /api/internal/start-recording
     // when it detects the SIP participant joining — ensures both channels are captured.

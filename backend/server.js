@@ -79,13 +79,13 @@ app.get('/api/internal/agent-config', async (req, res) => {
 
     // Try exact room name match first, then parse lead_id from room name pattern
     let cl = null;
-    const { data: byRoom } = await db.from('call_logs').select('*, agents(*), leads(name, city, budget, phone, property_type, language)').eq('livekit_room_name', room).single();
+    const { data: byRoom } = await db.from('call_logs').select('*, agents(*), leads(name, city, budget, phone, property_type, language, agent_id)').eq('livekit_room_name', room).single();
     cl = byRoom;
     if (!cl) {
       const leadIdMatch = (room || '').match(/^call-([a-f0-9-]{36})-/);
       if (leadIdMatch) {
         const { data: fallback } = await db.from('call_logs')
-          .select('*, agents(*), leads(name, city, budget, phone, property_type, language)')
+          .select('*, agents(*), leads(name, city, budget, phone, property_type, language, agent_id)')
           .eq('lead_id', leadIdMatch[1]).order('started_at', { ascending: false }).limit(1).single();
         cl = fallback;
       }
@@ -123,16 +123,35 @@ app.get('/api/internal/agent-config', async (req, res) => {
       }
     }
 
-    if (cl?.agents) return res.json({ ...cl.agents, ...platformKeys, lead_metadata: leadMeta });
+    // The agent is told WHETHER it may transfer, never the number — that is
+    // resolved server-side in /api/internal/transfer-call so it can be changed
+    // without redeploying agents and never lands in agent logs.
+    // prompt_spec is dropped too: system_prompt already holds its compiled form,
+    // and shipping both invites the agent to read the wrong one.
+    const stripSecrets = (a) => { const { transfer_phone_number, prompt_spec, ...rest } = a; return rest; };
 
-    // FALLBACK: call_log has no agent linked → use the user's most recently updated agent
+    if (cl?.agents) return res.json({ ...stripSecrets(cl.agents), ...platformKeys, lead_metadata: leadMeta });
+
+    // FALLBACK 1: call_log has no agent linked, but the lead is pinned to one.
+    // Reachable for call_logs written before per-lead agents existed, or by a
+    // caller that inserted a call_log directly. Both dial paths set agent_id now.
+    if (!cl?.agents && cl?.leads?.agent_id) {
+      const { data: leadAgent } = await db.from('agents')
+        .select('*').eq('id', cl.leads.agent_id).maybeSingle();
+      if (leadAgent) {
+        console.log(`[agent-config] room=${room} using lead's pinned agent: ${leadAgent.name}`);
+        return res.json({ ...stripSecrets(leadAgent), ...platformKeys, lead_metadata: leadMeta });
+      }
+    }
+
+    // FALLBACK 2: nothing pinned anywhere → the user's most recently updated agent
     if (cl?.user_id) {
       const { data: userAgent } = await db.from('agents')
         .select('*').eq('user_id', cl.user_id)
         .order('updated_at', { ascending: false }).limit(1).maybeSingle();
       if (userAgent) {
         console.log(`[agent-config] room=${room} fallback to user's agent: ${userAgent.name} (${userAgent.llm_model})`);
-        return res.json({ ...userAgent, ...platformKeys, lead_metadata: leadMeta });
+        return res.json({ ...stripSecrets(userAgent), ...platformKeys, lead_metadata: leadMeta });
       }
     }
 
@@ -203,6 +222,108 @@ app.post('/api/internal/start-recording', async (req, res) => {
   }
 });
 
+// ─── INTERNAL — warm transfer to a human ─────────────────────────────────────
+// agent.py calls this once the caller has accepted the offer to be transferred.
+// The transfer target is resolved here rather than in the agent so the number is
+// never shipped into the call config, and so a per-agent number can override the
+// platform default without redeploying the agent.
+app.post('/api/internal/transfer-call', async (req, res) => {
+  const secret = req.headers['x-internal-secret'];
+  if (secret !== process.env.INTERNAL_SECRET && process.env.INTERNAL_SECRET !== 'dev') {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const { room_name, participant_identity, reason } = req.body || {};
+  if (!room_name || !participant_identity) {
+    return res.status(400).json({ error: 'room_name and participant_identity required' });
+  }
+
+  try {
+    const db = require('./services/supabase');
+    const { transferSipCall } = require('./services/livekit');
+
+    const { data: cl } = await db.from('call_logs')
+      .select('id, user_id, agent_id, agents(transfer_enabled, transfer_phone_number, name)')
+      .eq('livekit_room_name', room_name)
+      .order('started_at', { ascending: false }).limit(1).maybeSingle();
+
+    if (!cl) return res.status(404).json({ error: 'Call log not found' });
+
+    const agent = cl.agents || {};
+    const target = agent.transfer_phone_number || process.env.TRANSFER_DEFAULT_NUMBER || null;
+
+    // Refuse rather than dial a stale number: transfer_enabled is the operator's
+    // explicit consent for this agent to hand calls to a person.
+    if (!agent.transfer_enabled) {
+      await db.from('call_logs').update({
+        transfer_status: 'failed', transfer_at: new Date().toISOString(),
+        transfer_detail: 'transfer not enabled for this agent',
+      }).eq('id', cl.id);
+      return res.status(400).json({ error: 'Transfer is not enabled for this agent' });
+    }
+    if (!target) {
+      await db.from('call_logs').update({
+        transfer_status: 'failed', transfer_at: new Date().toISOString(),
+        transfer_detail: 'no transfer number configured (agent or TRANSFER_DEFAULT_NUMBER)',
+      }).eq('id', cl.id);
+      return res.status(400).json({ error: 'No transfer number configured' });
+    }
+
+    const result = await transferSipCall(room_name, participant_identity, target);
+
+    await db.from('call_logs').update({
+      transfer_status: result.ok ? 'completed' : 'failed',
+      transfer_to: target,
+      transfer_at: new Date().toISOString(),
+      transfer_detail: result.ok ? (reason || 'caller accepted transfer') : result.error,
+      ...(result.ok ? { end_reason: 'transferred', outcome: 'transferred' } : {}),
+    }).eq('id', cl.id);
+
+    if (result.ok) {
+      await createEventSafe(db, cl.user_id, 'call.transferred',
+        `Call transferred to ${target}`, reason || '', { call_id: cl.id, transfer_to: target });
+    }
+
+    return res.status(result.ok ? 200 : 502).json(result);
+  } catch (err) {
+    console.error('[transfer-call] Error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Events are a nice-to-have on the transfer path — never let a failed notification
+// turn a successful transfer into a 500.
+async function createEventSafe(db, userId, type, title, body, data) {
+  try {
+    const { createEvent } = require('./services/notifications');
+    await createEvent(userId, type, title, body, data);
+  } catch (e) {
+    console.warn('[transfer-call] event write failed:', e.message);
+  }
+}
+
+// ─── INTERNAL — agent.py reports a provider failure seen during a live call ───
+// The periodic probe in services/keyHealth.js can be green while real traffic
+// fails (Groq's /models stays 200 after the chat quota is spent, and rate limits
+// only appear under concurrency). This is the path that catches that.
+app.post('/api/internal/key-failure', async (req, res) => {
+  const secret = req.headers['x-internal-secret'];
+  if (secret !== process.env.INTERNAL_SECRET && process.env.INTERNAL_SECRET !== 'dev') {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const { provider, detail, http_status } = req.body || {};
+  if (!provider) return res.status(400).json({ error: 'provider required' });
+  try {
+    const keyHealth = require('./services/keyHealth');
+    const result = await keyHealth.recordLiveFailure(provider, detail, http_status || null);
+    // Unknown providers are ignored rather than rejected: the agent should never
+    // fail a call because it reported a provider this backend does not track.
+    return res.json({ success: true, recorded: !!result });
+  } catch (err) {
+    console.error('[key-failure] Error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── WEBSOCKET — real-time dashboard updates ───────────────────────────────────
 const wss = new WebSocket.Server({ server, path: '/ws/dashboard' });
 const clients = new Map(); // userId → Set<ws>
@@ -269,4 +390,7 @@ server.listen(PORT, () => {
   require('./services/queue').startWorker(campaigns.processDialJob);
   campaigns.resumeInterruptedCampaigns()
     .catch(err => console.error('[Campaign] Resume-on-startup failed:', err.message));
+
+  // Periodic health check of the Sarvam / Groq / Plivo keys for the admin panel.
+  require('./services/keyHealth').startScheduler();
 });
