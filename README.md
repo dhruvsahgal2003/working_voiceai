@@ -1,4 +1,4 @@
-# PropConnect — AI Voice Calling Agent
+# Velryx — AI Voice Calling Agent
 ### Real Estate Lead Qualification · India · Plivo + Supabase + React
 
 ---
